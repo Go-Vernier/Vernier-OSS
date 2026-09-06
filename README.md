@@ -37,18 +37,19 @@ rest is not, and the report says so instead of guessing.
 | 3. Join | Optional runtime edges from OpenTelemetry or Datadog, with an explicit name-matching report | Planned |
 | 4. Report | Blast radius of a change, one PR, or the last N PRs; terminal and self-contained HTML | Planned |
 
-Not yet published to npm. Run it from source:
+Not yet published. Run it from source with a stable Rust toolchain:
 
 ```bash
 git clone https://github.com/Go-Vernier/Vernier-OSS.git
 cd Vernier-OSS
-pnpm install && pnpm build
-node dist/cli.js analyze /path/to/a/repository
-node dist/cli.js analyze /path/to/a/repository --json
+cargo build --release
+./target/release/blast-radius analyze /path/to/a/repository
+./target/release/blast-radius analyze /path/to/a/repository --json
 ```
 
-Once published, it will run as `npx blastradius analyze .` and install as
-`blast-radius`.
+The engine is Rust. The npm package `blastradius` will wrap the binary when
+it is published, so it will run as `npx blastradius analyze .` and install
+as `blast-radius`.
 
 ## What it looks like
 
@@ -129,23 +130,25 @@ the label of everything reached through it.
 ## Developing
 
 ```bash
-pnpm install
-pnpm test          # vitest, fixtures under test/fixtures
-pnpm typecheck
-pnpm build         # tsup -> dist/cli.js, dist/index.js
-pnpm corpus        # shallow-clone the eight reference repositories into corpus/
+cargo test                                # fixtures under test/fixtures, parity with the baseline
+cargo fmt --check && cargo clippy --all-targets -- -D warnings
+sh scripts/corpus.sh                      # shallow-clone the eight reference repositories into corpus/
+cargo test --test corpus -- --nocapture   # discovery counts and timing on the corpus
 ```
 
 Every change should run against the whole corpus. A regression on one repo
-is a regression on the product.
+is a regression on the product. `test/expected/corpus/` holds the expected
+services per repository; `test/expected/discovery/` holds the output the
+original TypeScript engine produced on every fixture, which the Rust engine
+must reproduce.
 
-The package also exposes a library:
+The `blastradius-core` crate is also a library:
 
-```ts
-import { analyze, formatRepoReport } from "blastradius";
+```rust
+use blastradius::{analyze, format_repo_report};
 
-const analysis = await analyze("./my-repo");
-console.log(formatRepoReport(analysis));
+let analysis = analyze(std::path::Path::new("./my-repo"))?;
+println!("{}", format_repo_report(&analysis, false));
 ```
 
 ## Relationship to Vernier

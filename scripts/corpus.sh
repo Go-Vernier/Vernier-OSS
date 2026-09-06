@@ -23,4 +23,4 @@ clone spring-petclinic-microservices https://github.com/spring-petclinic/spring-
 clone opentelemetry-demo             https://github.com/open-telemetry/opentelemetry-demo.git
 clone eshop                          https://github.com/dotnet/eShop.git
 clone ewolff-microservice            https://github.com/ewolff/microservice.git
-echo "Done. Run: node dist/cli.js analyze corpus/<name>"
+echo "Done. Run: cargo run -- analyze corpus/<name>"
