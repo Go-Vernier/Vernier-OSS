@@ -233,10 +233,31 @@ fn merge_edges(outcomes: Vec<Result<Edge, Unresolved>>, stats: &mut MappingStats
                     }
                 }
             }
-            Err(Unresolved::SelfEdge) => {}
+            Err(Unresolved::SelfEdge | Unresolved::Ignored) => {}
             Err(Unresolved::Unknown(name)) => {
-                stats.unresolved += 1;
-                unresolved_targets.insert(name);
+                if is_reportable(&name) {
+                    stats.unresolved += 1;
+                    unresolved_targets.insert(name);
+                }
+            }
+        }
+    }
+
+    // A URL on a pair that also has a gRPC stub is the stub's address.
+    let grpc_pairs: Vec<(String, String)> = merged
+        .keys()
+        .filter(|(_, _, t)| *t == EdgeType::Grpc)
+        .map(|(s, t, _)| (s.clone(), t.clone()))
+        .collect();
+    for (source, target) in grpc_pairs {
+        let http_key = (source.clone(), target.clone(), EdgeType::Http);
+        if let Some(http) = merged.shift_remove(&http_key) {
+            if let Some(grpc) = merged.get_mut(&(source, target, EdgeType::Grpc)) {
+                for item in http.evidence {
+                    if !grpc.evidence.iter().any(|(_, e)| *e == item.1) {
+                        grpc.evidence.push(item);
+                    }
+                }
             }
         }
     }
@@ -270,4 +291,19 @@ fn merge_edges(outcomes: Vec<Result<Edge, Unresolved>>, stats: &mut MappingStats
         .take(MAX_UNRESOLVED_LISTED)
         .collect();
     edges
+}
+
+/// Unresolved names worth listing: hostnames and variable names, not
+/// format placeholders, punctuation or bare numbers.
+fn is_reportable(name: &str) -> bool {
+    let mut chars = name.chars();
+    let first_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+    first_ok
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-' | ':'))
+        && name.len() >= 2
+        && name != "_"
 }

@@ -81,7 +81,10 @@ const NOISE: &[&str] = &[
 
 fn candidate_name(captured: &str) -> Option<String> {
     let name = captured.trim();
-    if name.len() < 3 || NOISE.contains(&name) {
+    if name.len() < 3
+        || NOISE.contains(&name)
+        || !name.starts_with(|c: char| c.is_ascii_uppercase())
+    {
         return None;
     }
     Some(name.to_string())

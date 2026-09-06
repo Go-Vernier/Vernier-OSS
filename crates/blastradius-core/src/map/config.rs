@@ -37,8 +37,10 @@ pub struct ConfigIndex {
     /// except `.env` which overrides `.env.example`.
     global: IndexMap<String, EnvValue>,
     pub protos: Vec<ProtoService>,
-    /// Names of discovered infrastructure services, for the bare-name rule.
+    /// Names of discovered infrastructure services.
     pub infrastructure_names: Vec<String>,
+    /// Names of every discovered service, for the bare-name rule.
+    pub service_names: Vec<String>,
 }
 
 const WORKLOAD_KINDS: &[&str] = &[
@@ -65,6 +67,7 @@ impl ConfigIndex {
                 .filter(|s| s.role == ServiceRole::Infrastructure)
                 .map(|s| s.name.clone())
                 .collect(),
+            service_names: services.iter().map(|s| s.name.clone()).collect(),
             ..Self::default()
         };
         cfg.read_compose(root, index);

@@ -25,6 +25,9 @@ pub struct Resolved {
 pub enum Unresolved {
     /// The candidate points back at its own service. Dropped, not counted.
     SelfEdge,
+    /// Too weak to report even as unresolved: a plain word that happens to
+    /// be a code service's name. Dropped, not counted.
+    Ignored,
     /// Nothing discovered matches. Counted and listed.
     Unknown(String),
 }
@@ -384,6 +387,10 @@ impl<'a> Resolver<'a> {
                 let target = self
                     .service_for_host(host)
                     .ok_or_else(|| Unresolved::Unknown(host.clone()))?;
+                // A plain word naming a code service is not evidence of a call.
+                if self.kind_of(target) == ServiceKind::Other {
+                    return Err(Unresolved::Ignored);
+                }
                 let ty = self.classify(target, None, false);
                 finish(
                     source,
@@ -520,6 +527,7 @@ impl<'a> Resolver<'a> {
             match attempt {
                 Ok(resolved) => return Ok(resolved),
                 Err(Unresolved::SelfEdge) => self_edge = true,
+                Err(Unresolved::Ignored) => {}
                 Err(Unresolved::Unknown(name)) => {
                     if first_unknown.is_none() {
                         first_unknown = Some(name);
@@ -644,6 +652,15 @@ mod tests {
         assert_eq!(
             ok(Target::BareName("rabbitmq".into())).confidence,
             Confidence::Uncertain
+        );
+        assert_eq!(
+            ok(Target::BareName("mysql".into())).edge_type,
+            EdgeType::Database,
+            "a code service named like a datastore still counts"
+        );
+        assert_eq!(
+            r.resolve("web", &cand(Target::BareName("catalogue".into()))),
+            Err(Unresolved::Ignored)
         );
         assert_eq!(
             r.resolve("web", &cand(Target::Url("http://example.com/x".into()))),
