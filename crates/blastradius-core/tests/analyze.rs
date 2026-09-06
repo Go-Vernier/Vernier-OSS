@@ -186,7 +186,7 @@ fn report_shows_findings_and_says_what_is_not_built() {
             .unwrap();
     assert!(re.is_match(&r), "{r}");
     assert!(r.contains("1 declared but not built here (images): redis"));
-    assert!(r.contains("Dependency mapping is not built yet"));
+    assert!(r.contains("STRUCTURE"));
     assert!(!r.contains('\u{1b}'));
 }
 

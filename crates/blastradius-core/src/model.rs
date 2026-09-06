@@ -20,6 +20,15 @@ pub enum Confidence {
 }
 
 impl Confidence {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Observed => "observed",
+            Self::Static => "static",
+            Self::Inferred => "inferred",
+            Self::Uncertain => "uncertain",
+        }
+    }
+
     /// Higher is more certain.
     pub fn rank(self) -> u8 {
         match self {

@@ -196,3 +196,50 @@ fn discovery_only_fixtures_still_have_no_edges_and_report_skips() {
     assert!(json.edges.is_empty(), "{:?}", json.edges);
     assert!(json.mapping.files_scanned >= 1);
 }
+
+// ----------------------------------------------------------------- report
+
+#[test]
+fn report_shows_structure_edges_and_findings() {
+    let r = format_repo_report(&analyze(&fixture("edges-http-app")).unwrap(), false);
+    assert!(r.contains("STRUCTURE"), "{r}");
+    assert!(
+        regex::Regex::new(r"Total edges\s+\d+")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(r.contains("Static") && r.contains("Uncertain"), "{r}");
+    assert!(r.contains("EDGES"), "{r}");
+    assert!(
+        regex::Regex::new(r"web\s+->\s+catalogue\s+http\s+static\s+web/default\.conf\.template:1")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(r.contains("FINDINGS"), "{r}");
+    assert!(r.contains("Never called by another service"), "{r}");
+    assert!(r.contains("Most connected"), "{r}");
+    assert!(
+        regex::Regex::new(r"Scanned \d+ files in \d+ services")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        r.contains("could not be matched to a service:") && r.contains("USER_HOST"),
+        "{r}"
+    );
+    assert!(!r.contains("Dependency mapping is not built yet"));
+}
+
+#[test]
+fn report_without_edges_says_none_were_found() {
+    let r = format_repo_report(&analyze(&fixture("compose-app")).unwrap(), false);
+    assert!(
+        regex::Regex::new(r"Total edges\s+0").unwrap().is_match(&r),
+        "{r}"
+    );
+    assert!(r.contains("No static edges found"), "{r}");
+    assert!(!r.contains("EDGES") && !r.contains("FINDINGS"), "{r}");
+}
