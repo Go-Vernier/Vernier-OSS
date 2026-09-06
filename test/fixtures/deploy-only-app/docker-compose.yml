@@ -1,0 +1,7 @@
+services:
+  front-end:
+    image: weaveworksdemos/front-end:0.3.12
+  carts:
+    image: weaveworksdemos/carts:0.4.8
+  carts-db:
+    image: mongo

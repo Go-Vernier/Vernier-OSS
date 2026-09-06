@@ -1,0 +1,21 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cartservice
+spec:
+  template:
+    spec:
+      containers:
+        - name: server
+          image: acme/cartservice:1.0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-cart
+spec:
+  template:
+    spec:
+      containers:
+        - name: redis
+          image: redis:alpine

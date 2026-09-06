@@ -1,0 +1,9 @@
+services:
+  config-server:
+    image: springcommunity/spring-petclinic-config-server
+  customers-service:
+    image: springcommunity/spring-petclinic-customers-service:3.2.0
+  vets-service:
+    image: springcommunity/spring-petclinic-vets-service
+  tracing-server:
+    image: openzipkin/zipkin

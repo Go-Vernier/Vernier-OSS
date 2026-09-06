@@ -1,0 +1,13 @@
+services:
+  ad:
+    image: ${IMAGE_NAME}:${DEMO_VERSION:-1.0}-ad
+    build:
+      context: ./
+      dockerfile: ${AD_DOCKERFILE}
+  cart:
+    image: ${IMAGE_NAME}:${DEMO_VERSION:-1.0}-cart
+    build:
+      context: ./
+      dockerfile: ${CART_DOCKERFILE}
+  db:
+    image: ${POSTGRES_IMAGE}

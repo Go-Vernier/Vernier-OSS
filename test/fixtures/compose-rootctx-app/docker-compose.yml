@@ -1,0 +1,11 @@
+services:
+  accounting:
+    build:
+      context: ./
+      dockerfile: ./src/accounting/Dockerfile
+  frontend:
+    build:
+      context: .
+      dockerfile: src/frontend/Dockerfile
+  kafka:
+    image: confluentinc/cp-kafka:7.6

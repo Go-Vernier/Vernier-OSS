@@ -1,0 +1,10 @@
+services:
+  checkout:
+    build: ./services/checkout
+    ports: ["3000:3000"]
+  orders:
+    build:
+      context: ./services/orders
+      dockerfile: Dockerfile
+  redis:
+    image: redis:7-alpine
