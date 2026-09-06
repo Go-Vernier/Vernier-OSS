@@ -24,8 +24,16 @@ static UNRESOLVED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\$\{?[A-Za-z_
 
 /// `KEY=value`, optional `export`, quotes, comments.
 pub fn parse_dotenv(text: &str) -> Env {
-    let mut env = Env::new();
-    for raw in text.lines() {
+    parse_dotenv_lines(text)
+        .into_iter()
+        .map(|(key, value, _)| (key, value))
+        .collect()
+}
+
+/// Every assignment with its 1-based line, in file order.
+pub fn parse_dotenv_lines(text: &str) -> Vec<(String, String, u32)> {
+    let mut out = Vec::new();
+    for (i, raw) in text.lines().enumerate() {
         let line = raw.trim();
         if line.is_empty() || line.starts_with('#') {
             continue;
@@ -35,9 +43,13 @@ pub fn parse_dotenv(text: &str) -> Env {
         };
         let key = caps[1].to_string();
         let value = caps.get(2).map_or("", |m| m.as_str());
-        env.insert(key, unquote(value));
+        out.push((
+            key,
+            unquote(value),
+            u32::try_from(i + 1).unwrap_or(u32::MAX),
+        ));
     }
-    env
+    out
 }
 
 /// A quoted value ends at its closing quote; anything after it is a comment.
