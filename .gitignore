@@ -5,3 +5,4 @@ corpus/
 *.tgz
 *.log
 .DS_Store
+target/

@@ -1,0 +1,24 @@
+[package]
+name = "blastradius-cli"
+description = "blast-radius command line"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "blast-radius"
+path = "src/main.rs"
+
+[dependencies]
+blastradius-core = { path = "../blastradius-core" }
+clap.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true
