@@ -1,0 +1,64 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/compose-app",
+  "discovery": {
+    "strategy": "docker-compose",
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 2
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "checkout",
+      "root": "services/checkout",
+      "language": "typescript",
+      "entryPoints": [
+        "src/index.ts"
+      ],
+      "role": "code",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 2,
+        "detail": "build: ./services/checkout"
+      },
+      "packageName": "@acme/checkout"
+    },
+    {
+      "name": "orders",
+      "root": "services/orders",
+      "language": "go",
+      "entryPoints": [
+        "main.go"
+      ],
+      "role": "code",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 5,
+        "detail": "build: ./services/orders"
+      }
+    },
+    {
+      "name": "redis",
+      "root": null,
+      "language": null,
+      "entryPoints": [],
+      "role": "infrastructure",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 9,
+        "detail": "image: redis:7-alpine"
+      },
+      "image": "redis:7-alpine"
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}

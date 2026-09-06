@@ -1,0 +1,61 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/compose-env-app",
+  "discovery": {
+    "strategy": "docker-compose",
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 2
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "ad",
+      "root": "src/ad",
+      "language": "java",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 2,
+        "detail": "build: ./, dockerfile: ./src/ad/Dockerfile"
+      },
+      "image": "ghcr.io/demo:1.0-ad"
+    },
+    {
+      "name": "cart",
+      "root": "src/cart",
+      "language": "go",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 7,
+        "detail": "build: ./, matched directory src/cart"
+      },
+      "image": "ghcr.io/demo:1.0-cart"
+    },
+    {
+      "name": "db",
+      "root": null,
+      "language": null,
+      "entryPoints": [],
+      "role": "infrastructure",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 12,
+        "detail": "image: ${POSTGRES_IMAGE}"
+      },
+      "image": "${POSTGRES_IMAGE}"
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}

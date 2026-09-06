@@ -1,0 +1,57 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/npm-workspace-app",
+  "discovery": {
+    "strategy": "workspace",
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 0
+      },
+      {
+        "strategy": "kubernetes",
+        "services": 0
+      },
+      {
+        "strategy": "monorepo",
+        "services": 0
+      },
+      {
+        "strategy": "workspace",
+        "services": 2
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "alpha",
+      "root": "modules/alpha",
+      "language": "javascript",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "workspace",
+      "evidence": {
+        "file": "package.json",
+        "detail": "modules/*"
+      },
+      "packageName": "alpha"
+    },
+    {
+      "name": "beta",
+      "root": "modules/beta",
+      "language": "javascript",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "workspace",
+      "evidence": {
+        "file": "package.json",
+        "detail": "modules/*"
+      },
+      "packageName": "beta"
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}

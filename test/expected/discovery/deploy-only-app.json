@@ -1,0 +1,73 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/deploy-only-app",
+  "discovery": {
+    "strategy": null,
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 0
+      },
+      {
+        "strategy": "kubernetes",
+        "services": 0
+      },
+      {
+        "strategy": "monorepo",
+        "services": 0
+      },
+      {
+        "strategy": "workspace",
+        "services": 0
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "carts",
+      "root": null,
+      "language": null,
+      "entryPoints": [],
+      "role": "infrastructure",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 4,
+        "detail": "image: weaveworksdemos/carts:0.4.8"
+      },
+      "image": "weaveworksdemos/carts:0.4.8"
+    },
+    {
+      "name": "carts-db",
+      "root": null,
+      "language": null,
+      "entryPoints": [],
+      "role": "infrastructure",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 6,
+        "detail": "image: mongo"
+      },
+      "image": "mongo"
+    },
+    {
+      "name": "front-end",
+      "root": null,
+      "language": null,
+      "entryPoints": [],
+      "role": "infrastructure",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 2,
+        "detail": "image: weaveworksdemos/front-end:0.3.12"
+      },
+      "image": "weaveworksdemos/front-end:0.3.12"
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}

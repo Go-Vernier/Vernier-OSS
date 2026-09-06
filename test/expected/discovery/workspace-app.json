@@ -1,0 +1,57 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/workspace-app",
+  "discovery": {
+    "strategy": "workspace",
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 0
+      },
+      {
+        "strategy": "kubernetes",
+        "services": 0
+      },
+      {
+        "strategy": "monorepo",
+        "services": 0
+      },
+      {
+        "strategy": "workspace",
+        "services": 2
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "billing",
+      "root": "components/billing",
+      "language": "typescript",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "workspace",
+      "evidence": {
+        "file": "pnpm-workspace.yaml",
+        "detail": "components/*"
+      },
+      "packageName": "@acme/billing"
+    },
+    {
+      "name": "gateway",
+      "root": "components/gateway",
+      "language": "javascript",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "workspace",
+      "evidence": {
+        "file": "pnpm-workspace.yaml",
+        "detail": "components/*"
+      },
+      "packageName": "@acme/gateway"
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}

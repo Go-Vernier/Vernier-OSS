@@ -1,0 +1,67 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/k8s-app",
+  "discovery": {
+    "strategy": "kubernetes",
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 0
+      },
+      {
+        "strategy": "kubernetes",
+        "services": 2
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "cartservice",
+      "root": "src/cartservice",
+      "language": "csharp",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "kubernetes",
+      "evidence": {
+        "file": "kubernetes/cart.yaml",
+        "line": 1,
+        "detail": "Deployment, image: acme/cartservice:1.0"
+      },
+      "image": "acme/cartservice:1.0"
+    },
+    {
+      "name": "frontend",
+      "root": "src/frontend",
+      "language": "go",
+      "entryPoints": [
+        "main.go"
+      ],
+      "role": "code",
+      "discoveredBy": "kubernetes",
+      "evidence": {
+        "file": "kubernetes/frontend.yaml",
+        "line": 9,
+        "detail": "Deployment, image: acme/frontend:1.0"
+      },
+      "image": "acme/frontend:1.0"
+    },
+    {
+      "name": "redis-cart",
+      "root": null,
+      "language": null,
+      "entryPoints": [],
+      "role": "infrastructure",
+      "discoveredBy": "kubernetes",
+      "evidence": {
+        "file": "kubernetes/cart.yaml",
+        "line": 12,
+        "detail": "Deployment, image: redis:alpine"
+      },
+      "image": "redis:alpine"
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}
