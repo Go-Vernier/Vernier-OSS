@@ -11,8 +11,8 @@ rust-version = "1.85"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-yaml-rust2 = "0.12"
+serde_json = { version = "1", features = ["preserve_order"] }
+libyaml-safer = "0.3"
 toml = "1"
 ignore = "0.4"
 globset = "0.4"

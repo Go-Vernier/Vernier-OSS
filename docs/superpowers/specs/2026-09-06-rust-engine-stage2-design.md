@@ -82,9 +82,15 @@ File walking uses the `ignore` crate: hidden entries and the fixed list
 changes any corpus count, the parity test says so and the decision is
 revisited then.
 
-YAML with line numbers: a small marked tree built on `yaml-rust2`'s event
-parser. Every mapping key carries its 1-based line. Documents that fail to
-parse are skipped individually.
+YAML with line numbers: a small marked tree built on the event parser of
+`libyaml-safer`, a Rust port of libyaml. The yaml-rust family was tried
+first and rejected the OpenTelemetry demo's compose file (a flow sequence
+closed at the key's indentation), which Docker Compose accepts. libyaml also
+reads sock-shop's `grafana-import-dashboards` Job, which the TypeScript
+engine's parser failed on, so that repository gains one infrastructure
+service over the baseline. Every mapping key carries its 1-based line.
+Parsing stops at the first error and keeps the documents completed before
+it; a parser panic is caught and treated as an unparseable file.
 
 ## Stage 2 architecture
 

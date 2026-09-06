@@ -1,12 +1,14 @@
 //! A YAML tree that remembers the line of every node, so evidence can point
-//! at the exact declaration. Built on yaml-rust2's event parser. Anchors,
-//! aliases and `<<` merge keys resolve; explicit keys beat merged ones.
-//! Parsing stops at the first error: documents completed before it are kept,
-//! later documents in the same file are lost.
+//! at the exact declaration. Built on libyaml-safer, a port of libyaml, so
+//! it accepts what Docker Compose and Kubernetes accept: the yaml-rust
+//! family rejects a flow sequence whose closing bracket sits at the key's
+//! indentation, and the OpenTelemetry demo's compose file does exactly that.
+//! Anchors, aliases and `<<` merge keys resolve; explicit keys beat merged
+//! ones. Parsing stops at the first error: documents completed before it are
+//! kept, later documents in the same file are lost.
 use std::collections::HashMap;
 
-use yaml_rust2::parser::{Event, MarkedEventReceiver, Parser, Tag};
-use yaml_rust2::scanner::{Marker, TScalarStyle};
+use libyaml_safer::{EventData, Parser, ScalarStyle};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Node {
@@ -75,9 +77,34 @@ impl Node {
 
 /// Every document that parsed.
 pub fn parse_documents(text: &str) -> Vec<Node> {
+    // libyaml-safer 0.3 panics on a block scalar that runs to the end of the
+    // input without a final newline (sock-shop's Prometheus ConfigMaps).
+    // A trailing newline never changes what YAML means, so add one; the
+    // unwind boundary is the backstop for inputs nobody has seen yet.
+    let mut owned;
+    let text = if text.ends_with('\n') {
+        text
+    } else {
+        owned = String::with_capacity(text.len() + 1);
+        owned.push_str(text);
+        owned.push('\n');
+        &owned
+    };
+    std::panic::catch_unwind(|| load(text)).unwrap_or_default()
+}
+
+fn load(text: &str) -> Vec<Node> {
+    let mut input = text.as_bytes();
+    let mut parser = Parser::new();
+    parser.set_input_string(&mut input);
     let mut loader = Loader::default();
     // On error the documents finished so far are what we have.
-    let _ = Parser::new_from_str(text).load(&mut loader, true);
+    while let Ok(event) = parser.parse() {
+        let line = u32::try_from(event.start_mark.line + 1).unwrap_or(u32::MAX);
+        if loader.on_event(event.data, line) {
+            break;
+        }
+    }
     loader.docs
 }
 
@@ -90,18 +117,18 @@ enum Frame {
     Seq {
         line: u32,
         items: Vec<Node>,
-        anchor: usize,
+        anchor: Option<String>,
     },
     Map {
         line: u32,
         entries: Vec<Entry>,
         pending_key: Option<Node>,
-        anchor: usize,
+        anchor: Option<String>,
     },
 }
 
 impl Frame {
-    fn finish(self) -> (Node, usize) {
+    fn finish(self) -> (Node, Option<String>) {
         match self {
             Self::Seq {
                 line,
@@ -165,13 +192,13 @@ fn flatten_entries(entries: Vec<Entry>) -> Vec<(Node, Node)> {
 struct Loader {
     docs: Vec<Node>,
     stack: Vec<Frame>,
-    anchors: HashMap<usize, Node>,
+    anchors: HashMap<String, Node>,
     root: Option<Node>,
 }
 
 impl Loader {
-    fn remember(&mut self, anchor: usize, node: &Node) {
-        if anchor != 0 {
+    fn remember(&mut self, anchor: Option<String>, node: &Node) {
+        if let Some(anchor) = anchor {
             self.anchors.insert(anchor, node.clone());
         }
     }
@@ -192,6 +219,60 @@ impl Loader {
                 Some(key) => entries.push(Entry::Explicit(key, node)),
             },
         }
+    }
+
+    /// Returns true at the end of the stream.
+    fn on_event(&mut self, event: EventData, line: u32) -> bool {
+        match event {
+            EventData::StreamEnd => return true,
+            EventData::StreamStart { .. } => {}
+            EventData::DocumentStart { .. } => self.root = None,
+            EventData::DocumentEnd { .. } => {
+                if let Some(root) = self.root.take() {
+                    self.docs.push(root);
+                }
+            }
+            EventData::Scalar {
+                anchor,
+                tag,
+                value,
+                style,
+                ..
+            } => {
+                let node = Node {
+                    line,
+                    kind: scalar_kind(value, style, tag.as_deref()),
+                };
+                self.remember(anchor, &node);
+                self.push_node(node);
+            }
+            EventData::SequenceStart { anchor, .. } => self.stack.push(Frame::Seq {
+                line,
+                items: Vec::new(),
+                anchor,
+            }),
+            EventData::MappingStart { anchor, .. } => self.stack.push(Frame::Map {
+                line,
+                entries: Vec::new(),
+                pending_key: None,
+                anchor,
+            }),
+            EventData::SequenceEnd | EventData::MappingEnd => {
+                if let Some(frame) = self.stack.pop() {
+                    let (node, anchor) = frame.finish();
+                    self.remember(anchor, &node);
+                    self.push_node(node);
+                }
+            }
+            EventData::Alias { anchor } => {
+                let node = self.anchors.get(&anchor).cloned().unwrap_or(Node {
+                    line,
+                    kind: Kind::Null,
+                });
+                self.push_node(node);
+            }
+        }
+        false
     }
 }
 
@@ -218,64 +299,18 @@ fn merge_source(node: Node) -> Vec<(Node, Node)> {
     }
 }
 
-impl MarkedEventReceiver for Loader {
-    fn on_event(&mut self, event: Event, mark: Marker) {
-        let line = u32::try_from(mark.line()).unwrap_or(u32::MAX);
-        match event {
-            Event::DocumentStart => self.root = None,
-            Event::DocumentEnd => {
-                if let Some(root) = self.root.take() {
-                    self.docs.push(root);
-                }
-            }
-            Event::Scalar(value, style, anchor, tag) => {
-                let node = Node {
-                    line,
-                    kind: scalar_kind(value, style, tag.as_ref()),
-                };
-                self.remember(anchor, &node);
-                self.push_node(node);
-            }
-            Event::SequenceStart(anchor, _) => self.stack.push(Frame::Seq {
-                line,
-                items: Vec::new(),
-                anchor,
-            }),
-            Event::MappingStart(anchor, _) => self.stack.push(Frame::Map {
-                line,
-                entries: Vec::new(),
-                pending_key: None,
-                anchor,
-            }),
-            Event::SequenceEnd | Event::MappingEnd => {
-                if let Some(frame) = self.stack.pop() {
-                    let (node, anchor) = frame.finish();
-                    self.remember(anchor, &node);
-                    self.push_node(node);
-                }
-            }
-            Event::Alias(anchor) => {
-                let node = self.anchors.get(&anchor).cloned().unwrap_or(Node {
-                    line,
-                    kind: Kind::Null,
-                });
-                self.push_node(node);
-            }
-            Event::Nothing | Event::StreamStart | Event::StreamEnd => {}
-        }
-    }
-}
-
-fn scalar_kind(value: String, style: TScalarStyle, tag: Option<&Tag>) -> Kind {
+/// Tags look like `tag:yaml.org,2002:str`; only the last segment matters.
+fn scalar_kind(value: String, style: ScalarStyle, tag: Option<&str>) -> Kind {
     if let Some(tag) = tag {
-        return match tag.suffix.as_str() {
+        let suffix = tag.rsplit(':').next().unwrap_or(tag);
+        return match suffix {
             "int" | "float" => Kind::Number(value),
             "bool" => Kind::Bool(matches!(value.as_str(), "true" | "True" | "TRUE")),
             "null" => Kind::Null,
             _ => Kind::Str(value),
         };
     }
-    if style != TScalarStyle::Plain {
+    if style != ScalarStyle::Plain {
         return Kind::Str(value);
     }
     match value.as_str() {
@@ -361,6 +396,31 @@ mod tests {
             .get("environment")
             .unwrap();
         assert_eq!(b.get("B").unwrap().as_str(), Some("2"));
+    }
+
+    #[test]
+    fn block_scalar_at_end_of_input_without_newline_parses() {
+        let docs = parse_documents("data:\n  rules: |-\n    a: 1\n    b: 2");
+        assert_eq!(
+            docs[0].get("data").unwrap().get("rules").unwrap().as_str(),
+            Some("a: 1\nb: 2")
+        );
+        let docs = parse_documents("data:\n  cfg: |\n    x");
+        assert_eq!(
+            docs[0].get("data").unwrap().get("cfg").unwrap().as_str(),
+            Some("x\n")
+        );
+    }
+
+    #[test]
+    fn flow_sequence_closed_at_key_indentation_parses() {
+        // Docker Compose accepts this; the yaml-rust family does not.
+        let docs = parse_documents(
+            "svc:\n  command: [\n    \"start\",\n    \"--uri\"\n  ]\n  ports:\n    - \"80\"\n",
+        );
+        let svc = docs[0].get("svc").unwrap();
+        assert_eq!(svc.get("command").unwrap().items().len(), 2);
+        assert_eq!(svc.get("ports").unwrap().items()[0].as_str(), Some("80"));
     }
 
     #[test]
