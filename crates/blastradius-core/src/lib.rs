@@ -8,6 +8,7 @@ pub mod analyze;
 pub mod discover;
 pub mod fs;
 pub mod graph;
+pub mod map;
 pub mod model;
 pub mod report;
 pub mod yaml;
