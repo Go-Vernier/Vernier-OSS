@@ -1,0 +1,22 @@
+services:
+  web:
+    build: ./web
+    environment:
+      CATALOGUE_HOST: catalogue
+      USER_HOST: user
+  cart:
+    build: ./cart
+    environment:
+      - REDIS_HOST=redis
+  catalogue:
+    build: ./catalogue
+  payment:
+    build: ./payment
+  ratings:
+    build: ./ratings
+  redis:
+    image: redis:7
+  rabbitmq:
+    image: rabbitmq:3-management
+  mongodb:
+    image: mongo:6

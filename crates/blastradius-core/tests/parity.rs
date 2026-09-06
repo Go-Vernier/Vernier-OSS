@@ -11,6 +11,8 @@ fn normalise(mut v: Value) -> Value {
     let obj = v.as_object_mut().unwrap();
     obj.remove("root");
     obj.remove("repository");
+    // Stage 2 added `mapping`; the baseline predates it.
+    obj.remove("mapping");
     if let Some(services) = obj.get_mut("services").and_then(Value::as_array_mut) {
         services.sort_by(|a, b| a["name"].as_str().cmp(&b["name"].as_str()));
     }

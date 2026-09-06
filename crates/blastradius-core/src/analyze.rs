@@ -10,6 +10,7 @@ use thiserror::Error;
 use crate::discover::{DiscoveryAttempt, discover_services};
 use crate::fs::{FileIndex, is_dir};
 use crate::graph::BlastGraph;
+use crate::map::{self, MappingStats};
 use crate::model::{DiscoveryStrategy, Edge, Service};
 
 #[derive(Debug, Error)]
@@ -40,6 +41,7 @@ pub struct Analysis {
     pub root: PathBuf,
     pub discovery: Discovery,
     pub graph: BlastGraph,
+    pub mapping: MappingStats,
     pub runtime: Runtime,
 }
 
@@ -52,6 +54,7 @@ pub struct AnalysisJson {
     pub discovery: Discovery,
     pub services: Vec<Service>,
     pub edges: Vec<Edge>,
+    pub mapping: MappingStats,
     pub runtime: Runtime,
 }
 
@@ -63,6 +66,7 @@ impl Analysis {
             discovery: self.discovery.clone(),
             services: self.graph.services(),
             edges: self.graph.edges().to_vec(),
+            mapping: self.mapping.clone(),
             runtime: self.runtime,
         }
     }
@@ -76,9 +80,16 @@ pub fn analyze(root: &Path) -> Result<Analysis, AnalyzeError> {
     let index = FileIndex::build(&root);
     let discovery = discover_services(&root, &index);
 
+    let mapped = map::run(&root, &index, &discovery.services);
+
     let mut graph = BlastGraph::new();
     for service in discovery.services {
         graph.add_service(service);
+    }
+    for edge in mapped.edges {
+        graph
+            .add_edge(edge)
+            .expect("mapping only produces edges between discovered services");
     }
 
     Ok(Analysis {
@@ -89,6 +100,7 @@ pub fn analyze(root: &Path) -> Result<Analysis, AnalyzeError> {
             attempted: discovery.attempted,
         },
         graph,
+        mapping: mapped.stats,
         runtime: Runtime::default(),
     })
 }

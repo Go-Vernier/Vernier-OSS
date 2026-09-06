@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkoutservice
+spec:
+  template:
+    spec:
+      containers:
+        - name: server
+          image: acme/checkoutservice:1.0
+          env:
+            - name: EMAIL_SERVICE_ADDR
+              value: "emailservice:5000"

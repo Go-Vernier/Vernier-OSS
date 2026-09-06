@@ -151,6 +151,7 @@ fn analyze_serialises_to_the_contract() {
             "discovery",
             "services",
             "edges",
+            "mapping",
             "runtime"
         ]
     );
