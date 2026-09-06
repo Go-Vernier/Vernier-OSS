@@ -1,0 +1,46 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/single-app",
+  "discovery": {
+    "strategy": null,
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 0
+      },
+      {
+        "strategy": "kubernetes",
+        "services": 0
+      },
+      {
+        "strategy": "monorepo",
+        "services": 0
+      },
+      {
+        "strategy": "workspace",
+        "services": 0
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "single-app",
+      "root": ".",
+      "language": "typescript",
+      "entryPoints": [
+        "src/index.ts"
+      ],
+      "role": "code",
+      "discoveredBy": "root",
+      "evidence": {
+        "file": "package.json",
+        "detail": "package.json"
+      },
+      "packageName": "single"
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}

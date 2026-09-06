@@ -1,0 +1,69 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/monorepo-app",
+  "discovery": {
+    "strategy": "monorepo",
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 0
+      },
+      {
+        "strategy": "kubernetes",
+        "services": 0
+      },
+      {
+        "strategy": "monorepo",
+        "services": 3
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "api",
+      "root": "services/api",
+      "language": "typescript",
+      "entryPoints": [
+        "src/server.ts"
+      ],
+      "role": "code",
+      "discoveredBy": "monorepo",
+      "evidence": {
+        "file": "services/api/package.json",
+        "detail": "package.json"
+      },
+      "packageName": "api"
+    },
+    {
+      "name": "web",
+      "root": "apps/web",
+      "language": "javascript",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "monorepo",
+      "evidence": {
+        "file": "apps/web/package.json",
+        "detail": "package.json"
+      },
+      "packageName": "web"
+    },
+    {
+      "name": "worker",
+      "root": "services/worker",
+      "language": "python",
+      "entryPoints": [
+        "main.py"
+      ],
+      "role": "code",
+      "discoveredBy": "monorepo",
+      "evidence": {
+        "file": "services/worker/requirements.txt",
+        "detail": "requirements.txt"
+      }
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}

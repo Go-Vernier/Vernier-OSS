@@ -1,0 +1,60 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/compose-rootctx-app",
+  "discovery": {
+    "strategy": "docker-compose",
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 2
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "accounting",
+      "root": "src/accounting",
+      "language": "go",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 2,
+        "detail": "build: ./, dockerfile: ./src/accounting/Dockerfile"
+      }
+    },
+    {
+      "name": "frontend",
+      "root": "src/frontend",
+      "language": "javascript",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 6,
+        "detail": "build: ., dockerfile: src/frontend/Dockerfile"
+      },
+      "packageName": "frontend"
+    },
+    {
+      "name": "kafka",
+      "root": null,
+      "language": null,
+      "entryPoints": [],
+      "role": "infrastructure",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 10,
+        "detail": "image: confluentinc/cp-kafka:7.6"
+      },
+      "image": "confluentinc/cp-kafka:7.6"
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}

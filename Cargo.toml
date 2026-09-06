@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = ["crates/blastradius-core", "crates/blastradius-cli"]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/Go-Vernier/Vernier-OSS"
+rust-version = "1.85"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+libyaml-safer = "0.3"
+toml = "1"
+ignore = "0.4"
+globset = "0.4"
+regex = "1"
+indexmap = { version = "2", features = ["serde"] }
+thiserror = "2"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+owo-colors = "4"
+pretty_assertions = "1"
+rayon = "1"
+tree-sitter = "0.27"
+tree-sitter-javascript = "0.25"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.25"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-c-sharp = "0.23"
+tree-sitter-php = "0.24"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+must_use_candidate = "allow"
+
+# Dependencies, the tree-sitter grammars above all, are compiled optimised
+# even in dev builds; our own crates stay unoptimised for fast rebuilds.
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

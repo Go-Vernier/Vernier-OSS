@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package hipstershop;
+
+service CartService {
+  rpc GetCart(GetCartRequest) returns (Cart) {}
+}
+
+service EmailService {
+  rpc SendOrderConfirmation(SendOrderConfirmationRequest) returns (Empty) {}
+}
+
+service ShippingService {
+  rpc ShipOrder(ShipOrderRequest) returns (ShipOrderResponse) {}
+}

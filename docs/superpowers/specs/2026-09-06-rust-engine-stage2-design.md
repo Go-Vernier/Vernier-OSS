@@ -82,9 +82,15 @@ File walking uses the `ignore` crate: hidden entries and the fixed list
 changes any corpus count, the parity test says so and the decision is
 revisited then.
 
-YAML with line numbers: a small marked tree built on `yaml-rust2`'s event
-parser. Every mapping key carries its 1-based line. Documents that fail to
-parse are skipped individually.
+YAML with line numbers: a small marked tree built on the event parser of
+`libyaml-safer`, a Rust port of libyaml. The yaml-rust family was tried
+first and rejected the OpenTelemetry demo's compose file (a flow sequence
+closed at the key's indentation), which Docker Compose accepts. libyaml also
+reads sock-shop's `grafana-import-dashboards` Job, which the TypeScript
+engine's parser failed on, so that repository gains one infrastructure
+service over the baseline. Every mapping key carries its 1-based line.
+Parsing stops at the first error and keeps the documents completed before
+it; a parser panic is caught and treated as an unparseable file.
 
 ## Stage 2 architecture
 
@@ -201,6 +207,30 @@ merge their evidence and keep the highest confidence.
 
 File ownership: a file belongs to the service with the longest `root` that
 prefixes its path. Files outside every root are counted, not scanned.
+
+### Decisions made while building
+
+- Configuration files are scanned by the regex extractor: nginx templates,
+  Spring properties, ini, toml, json, yaml, xml, shell scripts and
+  Dockerfiles. robot-shop's web tier exists only as an nginx template, and
+  its six edges live there.
+- An edge's type follows its target when the candidate was a host or a
+  variable: datastore names and images give `database`, broker names give
+  `event`, a scheme-less `host:port` whose target owns a proto service gives
+  `grpc`, everything else `http`. A specific URL scheme (`amqp`, `redis`,
+  `jdbc:mysql`) decides first.
+- A plain string literal equal to a service's name counts as an Uncertain
+  edge only when that service is a datastore or broker, whatever its role;
+  a plain word naming a code service is dropped without being counted.
+- PHP PDO data source names (`mysql:host=mysql;dbname=...`) are read as
+  database URLs.
+- An HTTP URL on a pair that also has a gRPC stub folds into the gRPC edge:
+  it is the stub's address.
+- `mapping` gained `unresolvedTargets`, the distinct unresolved names (at
+  most 50), because a count alone does not tell the reader what was missed.
+  Format placeholders, punctuation and bare numbers are not listed.
+- The parity baseline predates `mapping`; the parity test removes that key
+  before comparing.
 
 ### Terminal report additions
 

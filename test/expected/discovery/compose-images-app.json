@@ -1,0 +1,75 @@
+{
+  "repository": "Go-Vernier/Vernier-OSS",
+  "root": "/Users/soumyaranjanpanda/Dream YC/Vernier-OSS/test/fixtures/compose-images-app",
+  "discovery": {
+    "strategy": "docker-compose",
+    "attempted": [
+      {
+        "strategy": "docker-compose",
+        "services": 3
+      }
+    ]
+  },
+  "services": [
+    {
+      "name": "config-server",
+      "root": "spring-petclinic-config-server",
+      "language": "java",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 2,
+        "detail": "image: springcommunity/spring-petclinic-config-server"
+      },
+      "image": "springcommunity/spring-petclinic-config-server"
+    },
+    {
+      "name": "customers-service",
+      "root": "spring-petclinic-customers-service",
+      "language": "java",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 4,
+        "detail": "image: springcommunity/spring-petclinic-customers-service:3.2.0"
+      },
+      "image": "springcommunity/spring-petclinic-customers-service:3.2.0"
+    },
+    {
+      "name": "tracing-server",
+      "root": null,
+      "language": null,
+      "entryPoints": [],
+      "role": "infrastructure",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 8,
+        "detail": "image: openzipkin/zipkin"
+      },
+      "image": "openzipkin/zipkin"
+    },
+    {
+      "name": "vets-service",
+      "root": "spring-petclinic-vets-service",
+      "language": "java",
+      "entryPoints": [],
+      "role": "code",
+      "discoveredBy": "docker-compose",
+      "evidence": {
+        "file": "docker-compose.yml",
+        "line": 6,
+        "detail": "image: springcommunity/spring-petclinic-vets-service"
+      },
+      "image": "springcommunity/spring-petclinic-vets-service"
+    }
+  ],
+  "edges": [],
+  "runtime": {
+    "connected": false
+  }
+}
