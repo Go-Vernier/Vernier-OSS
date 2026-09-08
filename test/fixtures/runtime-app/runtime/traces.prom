@@ -1,0 +1,11 @@
+# HELP traces_service_graph_request_total Total count of requests between two nodes
+# TYPE traces_service_graph_request_total counter
+traces_service_graph_request_total{client="checkout-api",server="payment",connection_type=""} 120
+traces_service_graph_request_total{client="checkout-api",server="payment",connection_type="virtual_node"} 5
+traces_service_graph_request_total{client="checkout-api",server="catalogue-service",connection_type=""} 300
+traces_service_graph_request_total{client="orders",server="notifications",connection_type="messaging_system"} 42
+traces_service_graph_request_total{client="chckout",server="payment",connection_type=""} 7
+traces_service_graph_request_total{client="pay",server="redis",connection_type="database"} 900
+traces_service_graph_request_total{client="load-generator",server="checkout-api",connection_type=""} 1000
+traces_service_graph_request_total{client="auth-proxy",server="payment",connection_type=""} 3
+traces_service_graph_request_total{client="payment",server="payment",connection_type=""} 1

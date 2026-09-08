@@ -4,9 +4,13 @@
 //! into the graph. Every source produces the same `RuntimeGraph`.
 pub mod datadog;
 pub mod matching;
+pub mod merge;
 pub mod otlp;
 pub mod prometheus;
 
+use crate::analyze::{Analysis, Runtime, RuntimeEdges, RuntimeMapping, RuntimeServices};
+use crate::config::RuntimeConfig;
+use matching::MatchHow;
 use std::collections::BTreeSet;
 
 use thiserror::Error;
@@ -101,6 +105,58 @@ pub enum RuntimeError {
     Config(String),
     #[error("{0}")]
     Unsupported(String),
+}
+
+/// Matches the runtime graph's names to the discovered services, merges the
+/// calls into the analysis graph and fills the `runtime` block.
+pub fn join(
+    analysis: &mut Analysis,
+    runtime: RuntimeGraph,
+    config: &RuntimeConfig,
+) -> Result<(), RuntimeError> {
+    let services = analysis.graph.services();
+    let mapping = matching::match_names(&runtime.services, &services, config)?;
+    let counts = merge::apply(&mut analysis.graph, &runtime, &mapping);
+    let matched = mapping.iter().filter(|m| m.service.is_some()).count();
+    let warnings = mapping
+        .iter()
+        .filter_map(|m| match (&m.how, &m.service) {
+            (MatchHow::Fuzzy(score), Some(service)) => Some(format!(
+                "fuzzy match: {} -> {service} ({score:.2})",
+                m.runtime
+            )),
+            _ => None,
+        })
+        .collect();
+    analysis.runtime = Runtime {
+        connected: true,
+        source: Some(runtime.source),
+        input: Some(runtime.input),
+        services: Some(RuntimeServices {
+            runtime: runtime.services.len(),
+            matched,
+        }),
+        mapping: mapping
+            .iter()
+            .map(|m| RuntimeMapping {
+                runtime: m.runtime.clone(),
+                service: m.service.clone(),
+                how: m.how.as_str(),
+            })
+            .collect(),
+        unmatched: mapping
+            .iter()
+            .filter(|m| m.how == MatchHow::Unmatched)
+            .map(|m| m.runtime.clone())
+            .collect(),
+        edges: Some(RuntimeEdges {
+            observed: counts.observed,
+            runtime_only: counts.runtime_only,
+            skipped: counts.skipped,
+        }),
+        warnings,
+    };
+    Ok(())
 }
 
 #[cfg(test)]
