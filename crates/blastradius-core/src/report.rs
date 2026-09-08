@@ -49,7 +49,7 @@ pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
         .collect();
     let mut out: Vec<String> = Vec::new();
 
-    out.push(c.bold("BLAST RADIUS"));
+    out.push(c.bold("VERNIER"));
     out.push(String::new());
     out.push(row("Repository", &analysis.repository));
     let detected = match analysis.discovery.strategy {
@@ -61,7 +61,7 @@ pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
         None => format!("{} detected", code.len()),
     };
     out.push(row("Services", &detected));
-    out.push(row("Runtime", &c.dim("not connected - static only")));
+    out.push(row("Runtime", &runtime_header(analysis, &c)));
     out.push(String::new());
 
     if analysis.discovery.strategy.is_none() {
@@ -71,7 +71,7 @@ pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
                     "This repository declares {} services but builds none of them here,",
                     infra.len()
                 ),
-                "so there is no code to trace. Run blast-radius on the repository that".to_string(),
+                "so there is no code to trace. Run vernier on the repository that".to_string(),
                 "holds the services.".to_string(),
             ]
         } else {
@@ -121,6 +121,41 @@ pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
 
 fn row(label: &str, value: &str) -> String {
     format!("  {label:<13} {value}")
+}
+
+fn runtime_header(analysis: &Analysis, c: &Paint) -> String {
+    let r = &analysis.runtime;
+    let (Some(source), Some(services)) = (r.source, r.services) else {
+        return c.dim("not connected - static only");
+    };
+    let what = match r.input.as_deref() {
+        Some(input) if input.starts_with("datadog env ") => {
+            format!(
+                "{} {}",
+                source.label(),
+                input.trim_start_matches("datadog ")
+            )
+        }
+        _ => source.label().to_string(),
+    };
+    // Names the user ignored on purpose are not a partial join.
+    if services.matched + ignored_count(analysis) < services.runtime {
+        c.yellow(&format!(
+            "connected ({what}, {} of {} runtime services matched)",
+            services.matched, services.runtime
+        ))
+    } else {
+        format!("connected ({what}, {} services matched)", services.matched)
+    }
+}
+
+fn ignored_count(analysis: &Analysis) -> usize {
+    analysis
+        .runtime
+        .mapping
+        .iter()
+        .filter(|m| m.how == "ignored")
+        .count()
 }
 
 struct Row {
@@ -188,6 +223,7 @@ fn structure(analysis: &Analysis, services: &[Service], c: &Paint, out: &mut Vec
     structure_counts(edges, out);
     out.push(String::new());
     mapping_summary(analysis, services, c, out);
+    runtime_section(analysis, c, out);
     if edges.is_empty() {
         out.push(format!(
             "  {}",
@@ -200,7 +236,7 @@ fn structure(analysis: &Analysis, services: &[Service], c: &Paint, out: &mut Vec
     out.push(String::new());
     out.extend(edges_table(edges, c));
     out.push(String::new());
-    findings(edges, services, c, out);
+    findings(edges, services, c, out, analysis.runtime.connected);
 }
 
 fn structure_counts(edges: &[Edge], out: &mut Vec<String>) {
@@ -305,7 +341,108 @@ fn mapping_summary(analysis: &Analysis, services: &[Service], c: &Paint, out: &m
     }
 }
 
-fn findings(edges: &[Edge], services: &[Service], c: &Paint, out: &mut Vec<String>) {
+/// The join, printed whether or not it is complete: a partial mapping that
+/// looks complete is worse than none.
+fn runtime_section(analysis: &Analysis, c: &Paint, out: &mut Vec<String>) {
+    let r = &analysis.runtime;
+    let (Some(source), Some(services), Some(edges)) = (r.source, r.services, r.edges) else {
+        return;
+    };
+    out.push(String::new());
+    out.push(c.bold("RUNTIME"));
+    out.push(String::new());
+    out.push(row(
+        "Source",
+        &format!("{}  {}", source.label(), r.input.as_deref().unwrap_or("")),
+    ));
+    let ignored = ignored_count(analysis);
+    let ignored_note = match ignored {
+        0 => String::new(),
+        n => format!(" ({n} ignored by {})", crate::config::FILE_NAME),
+    };
+    out.push(row(
+        "Services",
+        &format!(
+            "{} of {} runtime services matched{ignored_note}",
+            services.matched, services.runtime
+        ),
+    ));
+    let noun = if edges.skipped == 1 { "call" } else { "calls" };
+    out.push(row(
+        "Edges",
+        &format!(
+            "{} observed ({} static confirmed, {} runtime only) · {} {noun} skipped, one end unmatched or ignored",
+            edges.observed,
+            edges.observed - edges.runtime_only,
+            edges.runtime_only,
+            edges.skipped
+        ),
+    ));
+    out.push(String::new());
+    let w_name = r
+        .mapping
+        .iter()
+        .map(|m| m.runtime.chars().count())
+        .max()
+        .unwrap_or(12)
+        .max(12);
+    let w_service = r
+        .mapping
+        .iter()
+        .filter_map(|m| m.service.as_ref())
+        .map(|s| s.chars().count())
+        .max()
+        .unwrap_or(7)
+        .max(7);
+    out.push(format!(
+        "  {}",
+        c.dim(&format!(
+            "{:<w_name$}  {:<w_service$}  HOW",
+            "RUNTIME NAME", "SERVICE"
+        ))
+    ));
+    for m in r.mapping.iter().filter(|m| m.how != "unmatched") {
+        let how = match m.how.as_str() {
+            "ignored" => format!("ignored ({})", crate::config::FILE_NAME),
+            h if h.starts_with("fuzzy") => format!("{h}  (check this)"),
+            h => h.to_string(),
+        };
+        let line = format!(
+            "  {:<w_name$}  {:<w_service$}  {how}",
+            m.runtime,
+            m.service.as_deref().unwrap_or("-")
+        );
+        out.push(if m.how.starts_with("fuzzy") {
+            c.yellow(&line)
+        } else {
+            line
+        });
+    }
+    if !r.unmatched.is_empty() {
+        out.push(String::new());
+        let noun = if r.unmatched.len() == 1 {
+            "service"
+        } else {
+            "services"
+        };
+        out.push(format!(
+            "  {}",
+            c.yellow(&format!(
+                "{} runtime {noun} matched nothing: {}",
+                r.unmatched.len(),
+                wrap(&r.unmatched.join(", "), 60)
+            ))
+        ));
+    }
+}
+
+fn findings(
+    edges: &[Edge],
+    services: &[Service],
+    c: &Paint,
+    out: &mut Vec<String>,
+    runtime_connected: bool,
+) {
     out.push(c.bold("FINDINGS"));
     out.push(String::new());
     let mut inbound: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
@@ -401,6 +538,39 @@ fn findings(edges: &[Edge], services: &[Service], c: &Paint, out: &mut Vec<Strin
     for (key, names) in &shared {
         let list = names.iter().copied().collect::<Vec<_>>().join(", ");
         out.push(format!("    {key:<36} {}", c.dim(&list)));
+    }
+    if runtime_connected {
+        never_observed_finding(edges, &code_names, c, out);
+    }
+}
+
+/// Call paths production never took. Imports are not calls, and a shared
+/// database between two code services is not one either, so neither can be
+/// observed and neither is listed.
+fn never_observed_finding(
+    edges: &[Edge],
+    code_names: &BTreeSet<&str>,
+    c: &Paint,
+    out: &mut Vec<String>,
+) {
+    let never: Vec<String> = edges
+        .iter()
+        .filter(|e| e.observed.is_none() && e.edge_type != EdgeType::Import)
+        .filter(|e| {
+            !(e.edge_type == EdgeType::Database
+                && code_names.contains(e.source.as_str())
+                && code_names.contains(e.target.as_str()))
+        })
+        .map(|e| format!("{} -> {}", e.source, e.target))
+        .collect();
+    out.push(String::new());
+    out.push(format!(
+        "  {:<38} {}",
+        "Static edges never observed",
+        never.len()
+    ));
+    if !never.is_empty() {
+        out.push(format!("    {}", c.dim(&wrap(&never.join(", "), 60))));
     }
 }
 

@@ -11,7 +11,7 @@ use crate::discover::{DiscoveryAttempt, discover_services};
 use crate::fs::{FileIndex, is_dir};
 use crate::graph::BlastGraph;
 use crate::map::{self, MappingStats};
-use crate::model::{DiscoveryStrategy, Edge, Service};
+use crate::model::{DiscoveryStrategy, Edge, RuntimeSource, Service};
 
 #[derive(Debug, Error)]
 pub enum AnalyzeError {
@@ -27,10 +27,49 @@ pub struct Discovery {
     pub attempted: Vec<DiscoveryAttempt>,
 }
 
-/// Stage 3 fills this in. Until then the report says so plainly.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeMapping {
+    pub runtime: String,
+    pub service: Option<String>,
+    pub how: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeServices {
+    pub runtime: usize,
+    pub matched: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeEdges {
+    pub observed: usize,
+    pub runtime_only: usize,
+    pub skipped: usize,
+}
+
+/// Stage 3 fills this in. Without a runtime source it serialises as
+/// `{ "connected": false }`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Runtime {
     pub connected: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<RuntimeSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub services: Option<RuntimeServices>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mapping: Vec<RuntimeMapping>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unmatched: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edges: Option<RuntimeEdges>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +106,7 @@ impl Analysis {
             services: self.graph.services(),
             edges: self.graph.edges().to_vec(),
             mapping: self.mapping.clone(),
-            runtime: self.runtime,
+            runtime: self.runtime.clone(),
         }
     }
 }

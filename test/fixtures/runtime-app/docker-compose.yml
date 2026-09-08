@@ -1,0 +1,15 @@
+services:
+  checkout:
+    build: ./checkout
+  payment:
+    build: ./payment
+  catalogue:
+    build: ./catalogue
+  orders:
+    build: ./orders
+  notifications:
+    build: ./notifications
+  rabbitmq:
+    image: rabbitmq:3-management
+  redis:
+    image: redis:7

@@ -247,6 +247,7 @@ fn collect_outcomes(
                                 line: candidate.evidence.line,
                                 detail: Some(resolved.detail),
                             }],
+                            observed: None,
                         }));
                     }
                 }

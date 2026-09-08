@@ -83,4 +83,19 @@ impl BlastGraph {
     pub fn size(&self) -> (usize, usize) {
         (self.services.len(), self.edges.len())
     }
+
+    /// The edges, for a stage that rewrites them (the runtime join).
+    pub fn edges_mut(&mut self) -> &mut Vec<Edge> {
+        &mut self.edges
+    }
+
+    /// The contract's order: by source, target, type.
+    pub fn sort_edges(&mut self) {
+        self.edges.sort_by(|a, b| {
+            a.source
+                .cmp(&b.source)
+                .then_with(|| a.target.cmp(&b.target))
+                .then_with(|| a.edge_type.cmp(&b.edge_type))
+        });
+    }
 }

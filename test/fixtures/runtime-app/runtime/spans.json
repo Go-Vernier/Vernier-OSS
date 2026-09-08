@@ -1,0 +1,14 @@
+{
+  "resourceSpans": [
+    { "resource": { "attributes": [ { "key": "service.name", "value": { "stringValue": "checkout-api" } } ] },
+      "scopeSpans": [ { "spans": [
+        { "traceId": "t1", "spanId": "a1", "parentSpanId": "", "kind": 3, "attributes": [ { "key": "peer.service", "value": { "stringValue": "payment" } } ] },
+        { "traceId": "t2", "spanId": "a2", "parentSpanId": "", "kind": 3, "attributes": [ { "key": "peer.service", "value": { "stringValue": "payment" } } ] },
+        { "traceId": "t3", "spanId": "a3", "parentSpanId": "", "kind": 3, "attributes": [ { "key": "peer.service", "value": { "stringValue": "catalogue" } } ] }
+      ] } ] },
+    { "resource": { "attributes": [ { "key": "service.name", "value": { "stringValue": "orders" } } ] },
+      "scopeSpans": [ { "spans": [
+        { "traceId": "t4", "spanId": "b1", "parentSpanId": "", "kind": 4, "attributes": [ { "key": "messaging.system", "value": { "stringValue": "rabbitmq" } }, { "key": "peer.service", "value": { "stringValue": "notifications" } } ] }
+      ] } ] }
+  ]
+}

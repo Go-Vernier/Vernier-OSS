@@ -1,0 +1,5 @@
+{
+  "checkout-api": { "calls": ["payment", "catalogue-service"] },
+  "orders": { "calls_out": ["notifications"] },
+  "auth-proxy": { "calls": ["payment"] }
+}
