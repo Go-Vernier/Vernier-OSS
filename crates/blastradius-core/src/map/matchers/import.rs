@@ -18,7 +18,7 @@ pub struct Import;
 
 /// npm, composer, `PyPI` and Cargo names: `@acme/shared`, `vendor/pkg`, `core-rs`.
 static PACKAGE_NAME: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(@[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*$").unwrap());
+    LazyLock::new(|| Regex::new(r"(?i)^(@?[a-z0-9][\w.-]*/)?[a-z0-9][\w.-]*$").unwrap());
 
 fn evidence(ctx: &FileContext<'_>, line: u32, detail: &str) -> Evidence {
     Evidence {
@@ -125,6 +125,16 @@ impl Matcher for Import {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn package_names_accept_scoped_and_vendor_forms() {
+        for name in ["@acme/shared", "vendor/pkg", "core-rs", "Basket.API"] {
+            assert!(PACKAGE_NAME.is_match(name), "{name:?} should match");
+        }
+        for name in ["workspace:*", "^4", "src/index.js x", ""] {
+            assert!(!PACKAGE_NAME.is_match(name), "{name:?} should not match");
+        }
+    }
 
     #[test]
     fn relative_project_paths_resolve_against_the_manifest_directory() {
