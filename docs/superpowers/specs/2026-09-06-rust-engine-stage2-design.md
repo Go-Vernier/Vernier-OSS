@@ -231,6 +231,50 @@ prefixes its path. Files outside every root are counted, not scanned.
   Format placeholders, punctuation and bare numbers are not listed.
 - The parity baseline predates `mapping`; the parity test removes that key
   before comparing.
+- Settings are facts. `key: value`, `key=value`, `<key>value</key>` and
+  Dockerfile `ENV` lines in configuration files, and `name = "literal"`
+  assignments in every language, become `Setting` facts. A hostish key
+  (`host`, `bootstrap-servers`, `DB_CONNECTION_STRING`) makes the value a
+  Static host candidate; the rest feed a per-service symbol table.
+- Topics are mostly constants. `self.EXCHANGE`, `Queues.queueName` and
+  `TopicName` resolve through the symbol table of the service, never across
+  services. A topic with a producer or consumer but no counterpart is
+  listed as `topic:<key>`; a bare declaration (`queue_declare`) with no
+  counterpart is dropped.
+- Constructing a typed event is producing it. eShop publishes variables, so
+  `new OrderStartedIntegrationEvent(...)` anywhere in a service makes it a
+  producer of that event; `*DomainEvent` types stay in-process and are
+  ignored, as is MediatR's `INotificationHandler`.
+- A client library import is an Inferred edge to the broker of its family
+  when the repository declares one (`import pika` → the `rabbitmq` image).
+- A shared-database key needs a database name: `host/dbname` from a URL or
+  connection string, a host setting paired with a database setting in the
+  same file, or an Aspire resource name. A bare host is not a key: two
+  services on one MySQL server with different schemas do not share data.
+- Import edges never count as unresolved. Almost every import is an
+  external library; listing them would bury the hostnames the reader needs.
+- Compose `environment: - KEY` without a value takes the value from the
+  `.env` beside the compose file, and dotenv values interpolate against
+  earlier lines of the same file. Both came from the OpenTelemetry demo's
+  `VALKEY_ADDR=valkey-cart:${VALKEY_PORT}`.
+- `"event"` is a stop word for topic keys, and the `new <Name>Event(...)`
+  producer rule is gated by that same topic-key filter, because eShop's
+  browser code constructs `new Event('change')`.
+- A database key is never taken from a value that still contains `$` or
+  `{`: a `${VAR}` template that reaches the matcher unrendered is not a key.
+- An assignment is a setting: `String order_service_url =
+  getServiceUrl("ts-order-service")` binds a hostish name to a service name
+  and gives a Static http edge, which is how forty-odd train-ticket calls
+  surfaced.
+- eShop lists IdentityServer's in-process audit events
+  (`topic:ConsentDeniedEvent` and five more) as unresolved topics. They are
+  real event types nothing in the repository consumes; listing them is
+  honest, and the bare-name rule's `X -> EventBus` Uncertain event edges on
+  the EventBus library project are a known pre-existing noise source left
+  for a follow-up.
+- The OpenTelemetry demo's Kafka topic is not found: the literal `"orders"`
+  sits in a `return` statement one step removed from the variable the
+  producer reads, and the facts layer reads assignments, not returns.
 
 ### Terminal report additions
 
