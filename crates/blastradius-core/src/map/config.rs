@@ -28,6 +28,15 @@ pub struct ProtoService {
     pub evidence: Evidence,
 }
 
+/// A name a service can be imported by: its package.json name, Go module
+/// path, Cargo or Maven artifact, .csproj stem, or Python directory.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Package {
+    pub name: String,
+    pub service: String,
+    pub evidence: Evidence,
+}
+
 #[derive(Debug, Default)]
 pub struct ConfigIndex {
     /// service name -> VAR -> value, from compose `environment` and
@@ -41,6 +50,9 @@ pub struct ConfigIndex {
     pub infrastructure_names: Vec<String>,
     /// Names of every discovered service, for the bare-name rule.
     pub service_names: Vec<String>,
+    /// Package/module names each service is importable by, kept empty
+    /// until a later stage fills it in.
+    pub packages: Vec<Package>,
 }
 
 const WORKLOAD_KINDS: &[&str] = &[
