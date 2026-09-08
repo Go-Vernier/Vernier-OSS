@@ -404,3 +404,66 @@ fn event_edges_join_producers_to_consumers_and_brokers_to_libraries() {
         "res.send is not a producer"
     );
 }
+
+#[test]
+fn import_edges_from_imports_dependencies_and_project_references() {
+    let (edges, json) = edges_of("edges-import-app");
+    let e = find(&edges, "web", "shared", EdgeType::Import);
+    assert_eq!(e.confidence, Confidence::Static);
+    let details: Vec<&str> = e
+        .evidence
+        .iter()
+        .filter_map(|v| v.detail.as_deref())
+        .collect();
+    assert!(
+        details.contains(&"import @acme/shared/utils"),
+        "{details:?}"
+    );
+    assert!(details.contains(&"dependency @acme/shared"), "{details:?}");
+    assert_eq!(
+        find(&edges, "checkout", "cart", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("import github.com/acme/demo/services/cart/genproto")
+    );
+    assert_eq!(
+        find(&edges, "basket-api", "eventbus", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("ProjectReference ..\\eventbus\\EventBus.csproj")
+    );
+    assert_eq!(
+        find(&edges, "orders", "common", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("artifactId common")
+    );
+    assert_eq!(
+        find(&edges, "indexer", "core-rs", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("path ../core-rs")
+    );
+    assert_eq!(
+        find(&edges, "worker", "shared_py", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("import shared_py.tasks")
+    );
+    assert!(
+        edges.iter().all(|e| e.edge_type == EdgeType::Import),
+        "{:?}",
+        edges.iter().map(triple).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        edges.len(),
+        6,
+        "{:?}",
+        edges.iter().map(triple).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        json.mapping.unresolved, 0,
+        "external libraries are not unresolved targets: {:?}",
+        json.mapping.unresolved_targets
+    );
+}

@@ -4,6 +4,7 @@ pub mod database;
 pub mod event;
 pub mod grpc;
 pub mod http;
+pub mod import;
 
 use super::Candidate;
 use super::config::ConfigIndex;
@@ -29,5 +30,6 @@ pub fn all() -> Vec<Box<dyn Matcher>> {
         Box::new(grpc::Grpc),
         Box::new(event::Event),
         Box::new(database::Database),
+        Box::new(import::Import),
     ]
 }

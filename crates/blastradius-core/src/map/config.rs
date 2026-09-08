@@ -70,6 +70,11 @@ static PROTO_SERVICE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^\s*service\s+(\w+)\s*\{").unwrap());
 static PROTO_PACKAGE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?m)^\s*package\s+([\w.]+)\s*;").unwrap());
+static GO_MODULE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^module\s+(\S+)").unwrap());
+static POM_PARENT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?s)<parent>.*?</parent>").unwrap());
+static POM_ARTIFACT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"<artifactId>\s*([^<\s]+)\s*</artifactId>").unwrap());
 
 impl ConfigIndex {
     pub fn build(root: &Path, index: &FileIndex, services: &[Service]) -> Self {
@@ -86,6 +91,7 @@ impl ConfigIndex {
         cfg.read_kubernetes(root, index);
         cfg.read_dotenv(root);
         cfg.read_protos(root, index);
+        cfg.read_packages(root, services);
         cfg
     }
 
@@ -322,6 +328,117 @@ impl ConfigIndex {
         }
     }
 
+    /// The names each code service can be imported by, from its manifest.
+    #[allow(clippy::too_many_lines)]
+    fn read_packages(&mut self, root: &Path, services: &[Service]) {
+        let mut discovered: Vec<Package> = Vec::new();
+        for s in services.iter().filter(|s| s.role == ServiceRole::Code) {
+            let Some(dir) = s.root.as_deref() else {
+                continue;
+            };
+            let mut add = |name: String, file: String| {
+                let name = name.trim().to_string();
+                if name.is_empty()
+                    || discovered
+                        .iter()
+                        .any(|p| p.name == name && p.service == s.name)
+                {
+                    return;
+                }
+                discovered.push(Package {
+                    name,
+                    service: s.name.clone(),
+                    evidence: Evidence {
+                        file,
+                        line: None,
+                        detail: None,
+                    },
+                });
+            };
+            let at = |file: &str| {
+                if dir == "." {
+                    file.to_string()
+                } else {
+                    format!("{dir}/{file}")
+                }
+            };
+            if let Some(name) = &s.package_name {
+                add(name.clone(), at("package.json"));
+            }
+            if let Some(pkg) = crate::fs::read_json(&root.join(dir).join("package.json")) {
+                if let Some(name) = pkg.get("name").and_then(|v| v.as_str()) {
+                    add(name.to_string(), at("package.json"));
+                }
+            }
+            if let Some(text) = read_text(&root.join(dir).join("go.mod")) {
+                if let Some(caps) = GO_MODULE.captures(&text) {
+                    add(caps[1].to_string(), at("go.mod"));
+                }
+            }
+            if let Some(text) = read_text(&root.join(dir).join("Cargo.toml")) {
+                if let Some(name) = toml::from_str::<toml::Table>(&text).ok().and_then(|t| {
+                    t.get("package")?
+                        .as_table()?
+                        .get("name")?
+                        .as_str()
+                        .map(str::to_string)
+                }) {
+                    add(name, at("Cargo.toml"));
+                }
+            }
+            if let Some(text) = read_text(&root.join(dir).join("pom.xml")) {
+                let own = POM_PARENT.replace(&text, "");
+                if let Some(caps) = POM_ARTIFACT.captures(&own) {
+                    add(caps[1].to_string(), at("pom.xml"));
+                }
+            }
+            if let Some(pkg) = crate::fs::read_json(&root.join(dir).join("composer.json")) {
+                if let Some(name) = pkg.get("name").and_then(|v| v.as_str()) {
+                    add(name.to_string(), at("composer.json"));
+                }
+            }
+            if let Some(text) = read_text(&root.join(dir).join("pyproject.toml")) {
+                if let Ok(t) = toml::from_str::<toml::Table>(&text) {
+                    let name = t
+                        .get("project")
+                        .and_then(|p| p.get("name"))
+                        .or_else(|| t.get("tool")?.get("poetry")?.get("name"))
+                        .and_then(|v| v.as_str());
+                    if let Some(name) = name {
+                        add(name.to_string(), at("pyproject.toml"));
+                    }
+                }
+            }
+            if let Ok(entries) = std::fs::read_dir(root.join(dir)) {
+                let mut projects: Vec<String> = entries
+                    .flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.ends_with(".csproj") || n.ends_with(".fsproj"))
+                    .collect();
+                projects.sort();
+                for project in projects {
+                    let stem = project
+                        .rsplit_once('.')
+                        .map_or(project.as_str(), |(s, _)| s)
+                        .to_string();
+                    add(stem, at(&project));
+                }
+            }
+            if s.language.as_deref() == Some("python") {
+                let base = dir.rsplit('/').next().unwrap_or(dir).to_string();
+                let evidence_file = if root.join(dir).join("requirements.txt").is_file() {
+                    at("requirements.txt")
+                } else if root.join(dir).join("pyproject.toml").is_file() {
+                    at("pyproject.toml")
+                } else {
+                    dir.to_string()
+                };
+                add(base, evidence_file);
+            }
+        }
+        self.packages.extend(discovered);
+    }
+
     #[cfg(test)]
     #[allow(dead_code)]
     pub(crate) fn insert_for_test(
@@ -479,5 +596,35 @@ mod tests {
             Some("valkey-cart:6379"),
             "dotenv values are global and interpolated against their own file"
         );
+    }
+
+    #[test]
+    fn packages_are_read_from_every_manifest_kind() {
+        let cfg = build("edges-import-app");
+        let mut got: Vec<(&str, &str)> = cfg
+            .packages
+            .iter()
+            .map(|p| (p.name.as_str(), p.service.as_str()))
+            .collect();
+        got.sort_unstable();
+        assert_eq!(
+            got,
+            vec![
+                ("@acme/shared", "shared"),
+                ("Basket.API", "basket-api"),
+                ("EventBus", "eventbus"),
+                ("common", "common"),
+                ("core-rs", "core-rs"),
+                ("github.com/acme/demo/services/cart", "cart"),
+                ("github.com/acme/demo/services/checkout", "checkout"),
+                ("indexer", "indexer"),
+                ("orders", "orders"),
+                ("shared_py", "shared_py"),
+                ("web", "web"),
+                ("worker", "worker"),
+            ]
+        );
+        let p = cfg.packages.iter().find(|p| p.name == "orders").unwrap();
+        assert_eq!(p.evidence.file, "services/orders/pom.xml");
     }
 }

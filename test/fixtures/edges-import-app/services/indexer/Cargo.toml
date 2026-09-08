@@ -1,0 +1,6 @@
+[package]
+name = "indexer"
+
+[dependencies]
+core-rs = { path = "../core-rs" }
+serde = "1"
