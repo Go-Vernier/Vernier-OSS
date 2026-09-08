@@ -1,0 +1,29 @@
+services:
+  catalogue:
+    build: ./catalogue
+  user:
+    build: ./user
+  orders:
+    build: ./orders
+  reports:
+    build: ./reports
+    environment:
+      - DB_CONNECTION_STRING=postgres://app:${POSTGRES_PASSWORD}@${POSTGRES_HOST}/shop?sslmode=disable
+  cart:
+    build: ./cart
+    environment:
+      - VALKEY_ADDR
+  ledger:
+    build: ./ledger
+  audit:
+    build: ./audit
+  inventory:
+    build: ./inventory
+  mongodb:
+    image: mongo:6
+  mysql:
+    image: mysql:8
+  postgres:
+    image: postgres:16
+  valkey-cart:
+    image: valkey/valkey:8

@@ -1,0 +1,1 @@
+builder.AddNpgsqlDbContext<LedgerContext>("ledgerdb");

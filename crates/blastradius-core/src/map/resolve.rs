@@ -118,6 +118,12 @@ static HOSTNAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9.-]*$").unwrap());
 
 const HOSTISH_SUFFIXES: &[&str] = &[
+    "_CONNECTION_STRING",
+    "_CONNECTIONSTRING",
+    "_BOOTSTRAP_SERVERS",
+    "_CONNECTION",
+    "_BROKERS",
+    "_DSN",
     "_SERVICE_HOST",
     "_SERVICE_ADDR",
     "_SERVICE_URL",
@@ -165,6 +171,58 @@ pub fn is_hostish_var(name: &str) -> bool {
     HOSTISH_SUFFIXES.iter().any(|s| upper.ends_with(s))
 }
 
+/// Keys of settings that hold a host: the last dotted segment is a hostish
+/// word, or the whole key is a hostish variable name.
+const HOSTISH_KEYS: &[&str] = &[
+    "host",
+    "hostname",
+    "hosts",
+    "url",
+    "uri",
+    "addr",
+    "address",
+    "endpoint",
+    "server",
+    "servers",
+    "brokers",
+    "bootstrap-servers",
+    "bootstrap_servers",
+    "bootstrapservers",
+    "nodes",
+    "seeds",
+    "contact-points",
+    "contactpoints",
+    "connection-string",
+    "connectionstring",
+    "connection_string",
+    "dsn",
+];
+
+pub fn is_hostish_key(key: &str) -> bool {
+    let key = key.trim();
+    let last = key.rsplit('.').next().unwrap_or(key);
+    let last = last.split('[').next().unwrap_or(last).to_lowercase();
+    HOSTISH_KEYS.contains(&last.as_str()) || is_hostish_var(key)
+}
+
+static ADO_HOST: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:^|;)\s*(?:server|host|data source|addr|address)\s*=\s*([^;,:\s]+)").unwrap()
+});
+static ADO_DATABASE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:^|;)\s*(?:database|initial catalog)\s*=\s*([^;\s]+)").unwrap()
+});
+
+/// ADO.NET style `Host=x;Database=y;...`: (host, database), lowercased, the
+/// port after `,` or `:` removed. None unless both parts are present.
+pub fn ado_connection(text: &str) -> Option<(String, String)> {
+    let host = ADO_HOST.captures(text)?[1].trim().to_lowercase();
+    let database = ADO_DATABASE.captures(text)?[1].trim().to_lowercase();
+    if host.is_empty() || database.is_empty() || text.contains("://") {
+        return None;
+    }
+    Some((host, database))
+}
+
 /// `PRODUCT_CATALOG_SERVICE_ADDR` -> `productcatalog`, `CATALOGUE_HOST` ->
 /// `catalogue`: strip hostish suffixes, then the service-name normalisation.
 pub fn normalise_var(name: &str) -> String {
@@ -186,7 +244,7 @@ pub fn normalise_var(name: &str) -> String {
     normalise(&upper)
 }
 
-fn is_local(host: &str) -> bool {
+pub(crate) fn is_local(host: &str) -> bool {
     host == "localhost"
         || host == "0.0.0.0"
         || host == "::1"
@@ -374,14 +432,24 @@ impl<'a> Resolver<'a> {
                     .service_for_host(&host)
                     .ok_or_else(|| Unresolved::Unknown(host.clone()))?;
                 let ty = self.classify(target, None, true);
-                finish(source, target, ty, Confidence::Static, text.clone(), hint)
+                let detail = candidate
+                    .evidence
+                    .detail
+                    .clone()
+                    .unwrap_or_else(|| text.clone());
+                finish(source, target, ty, Confidence::Static, detail, hint)
             }
             Target::Host(host) => {
                 let target = self
                     .service_for_host(host)
                     .ok_or_else(|| Unresolved::Unknown(host.clone()))?;
                 let ty = self.classify(target, None, false);
-                finish(source, target, ty, Confidence::Static, host.clone(), hint)
+                let detail = candidate
+                    .evidence
+                    .detail
+                    .clone()
+                    .unwrap_or_else(|| host.clone());
+                finish(source, target, ty, Confidence::Static, detail, hint)
             }
             Target::BareName(host) => {
                 let target = self
@@ -850,5 +918,33 @@ mod tests {
         );
         assert_eq!(host_port("payment:50051"), Some("payment".into()));
         assert_eq!(host_port("http://x"), None);
+    }
+
+    #[test]
+    #[allow(clippy::bool_comparison, clippy::manual_assert_eq)]
+    fn hostish_keys_and_connection_strings() {
+        assert!(is_hostish_key("spring.data.mongodb.host"));
+        assert!(is_hostish_key("bootstrap-servers"));
+        assert!(is_hostish_key("host"));
+        assert!(is_hostish_key("spring.kafka.bootstrap-servers"));
+        assert!(is_hostish_key("DB_CONNECTION_STRING"));
+        assert!(is_hostish_key("eureka.client.serviceUrl.defaultZone") == false);
+        assert!(!is_hostish_key("spring.data.mongodb.database"));
+        assert!(!is_hostish_key("name") && !is_hostish_key("image"));
+        assert!(is_hostish_var("DB_CONNECTION_STRING") && is_hostish_var("PDO_DSN"));
+        assert_eq!(
+            ado_connection("Host=localhost;Database=LedgerDB;Username=postgres;Password=x"),
+            Some(("localhost".into(), "ledgerdb".into()))
+        );
+        assert_eq!(
+            ado_connection("Server=sql,1433;Initial Catalog=Shop;User Id=sa"),
+            Some(("sql".into(), "shop".into()))
+        );
+        assert_eq!(
+            ado_connection("Data Source=sql:5432;Database=Shop"),
+            Some(("sql".into(), "shop".into()))
+        );
+        assert_eq!(ado_connection("Host=localhost;Username=postgres"), None);
+        assert_eq!(ado_connection("mongodb://mongodb/x"), None);
     }
 }

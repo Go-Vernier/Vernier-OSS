@@ -243,3 +243,50 @@ fn report_without_edges_says_none_were_found() {
     assert!(r.contains("No static edges found"), "{r}");
     assert!(!r.contains("EDGES") && !r.contains("FINDINGS"), "{r}");
 }
+
+#[test]
+fn database_edges_from_settings_connection_strings_and_dotenv() {
+    let (edges, json) = edges_of("edges-db-app");
+    let e = find(&edges, "inventory", "mongodb", EdgeType::Database);
+    assert_eq!(e.confidence, Confidence::Static);
+    assert_eq!(
+        e.evidence[0].detail.as_deref(),
+        Some("spring.data.mongodb.host=mongodb")
+    );
+    let e = find(&edges, "cart", "valkey-cart", EdgeType::Database);
+    assert_eq!(e.confidence, Confidence::Static);
+    assert!(
+        e.evidence[0]
+            .detail
+            .as_deref()
+            .unwrap()
+            .starts_with("VALKEY_ADDR=valkey-cart:6379 via docker-compose.yml:"),
+        "{:?}",
+        e.evidence
+    );
+    let e = find(&edges, "reports", "postgres", EdgeType::Database);
+    assert!(
+        e.evidence[0]
+            .detail
+            .as_deref()
+            .unwrap()
+            .starts_with("DB_CONNECTION_STRING=postgres://app:secret@postgres/shop"),
+        "{:?}",
+        e.evidence
+    );
+    find(&edges, "reports", "mysql", EdgeType::Database);
+    find(&edges, "orders", "mysql", EdgeType::Database);
+    find(&edges, "catalogue", "mongodb", EdgeType::Database);
+    find(&edges, "user", "mongodb", EdgeType::Database);
+    assert!(
+        !edges.iter().any(|e| e.target == "localhost"),
+        "{:?}",
+        edges.iter().map(triple).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        json.mapping.unresolved_targets,
+        Vec::<String>::new(),
+        "{:?}",
+        json.mapping.unresolved_targets
+    );
+}

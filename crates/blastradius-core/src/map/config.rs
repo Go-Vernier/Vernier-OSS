@@ -177,14 +177,20 @@ impl ConfigIndex {
             let Some(text) = item.as_scalar_string() else {
                 continue;
             };
-            let Some((var, value)) = text.split_once('=') else {
-                continue;
+            let (var, value) = if let Some((var, value)) = text.split_once('=') {
+                (var.trim().to_string(), interpolate(value.trim(), env))
+            } else {
+                let var = text.trim();
+                let Some(value) = env.get(var) else {
+                    continue;
+                };
+                (var.to_string(), value.clone())
             };
             self.insert_service(
                 service,
-                var.trim().to_string(),
+                var,
                 EnvValue {
-                    value: interpolate(value.trim(), env),
+                    value,
                     evidence: Evidence {
                         file: file.to_string(),
                         line: Some(item.line),
@@ -258,11 +264,14 @@ impl ConfigIndex {
     }
 
     fn read_dotenv(&mut self, root: &Path) {
+        let mut seen = Env::new();
         for file in [".env.example", ".env"] {
             let Some(text) = read_text(&root.join(file)) else {
                 continue;
             };
             for (var, value, line) in parse_dotenv_lines(&text) {
+                let value = interpolate(&value, &seen);
+                seen.insert(var.clone(), value.clone());
                 self.global.insert(
                     var,
                     EnvValue {
@@ -433,5 +442,30 @@ mod tests {
         assert_eq!(cfg.protos[0].evidence.file, "protos/demo.proto");
         assert_eq!(cfg.protos[0].evidence.line, Some(5));
         assert_eq!(cfg.protos[0].package.as_deref(), Some("hipstershop"));
+    }
+
+    #[test]
+    fn dotenv_values_interpolate_and_bare_compose_keys_pass_through() {
+        let cfg = build("edges-db-app");
+        assert_eq!(
+            cfg.lookup("cart", "VALKEY_ADDR").map(|v| v.value.as_str()),
+            Some("valkey-cart:6379")
+        );
+        assert_eq!(
+            cfg.lookup("cart", "VALKEY_ADDR")
+                .map(|v| v.evidence.file.as_str()),
+            Some("docker-compose.yml")
+        );
+        assert_eq!(
+            cfg.lookup("reports", "DB_CONNECTION_STRING")
+                .map(|v| v.value.as_str()),
+            Some("postgres://app:secret@postgres/shop?sslmode=disable")
+        );
+        assert_eq!(
+            cfg.lookup("nobody", "VALKEY_ADDR")
+                .map(|v| v.value.as_str()),
+            Some("valkey-cart:6379"),
+            "dotenv values are global and interpolated against their own file"
+        );
     }
 }
