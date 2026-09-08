@@ -14,7 +14,8 @@ pub mod report;
 pub mod yaml;
 
 pub use analyze::{
-    Analysis, AnalysisJson, AnalyzeError, Discovery, Runtime, analyze, repository_name,
+    Analysis, AnalysisJson, AnalyzeError, Discovery, Runtime, RuntimeEdges, RuntimeMapping,
+    RuntimeServices, analyze, repository_name,
 };
 pub use graph::{BlastGraph, GraphError};
 pub use map::MappingStats;

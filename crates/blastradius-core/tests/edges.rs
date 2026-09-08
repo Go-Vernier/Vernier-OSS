@@ -188,6 +188,13 @@ fn json_contract_gains_mapping_between_edges_and_runtime() {
         vec!["source", "target", "type", "confidence", "evidence"]
     );
     assert!(json["edges"][0]["evidence"][0]["detail"].is_string());
+    assert_eq!(
+        json["runtime"],
+        serde_json::json!({ "connected": false }),
+        "{}",
+        json["runtime"]
+    );
+    assert!(json["edges"][0].get("observed").is_none());
 }
 
 #[test]

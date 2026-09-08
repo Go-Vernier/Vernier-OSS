@@ -29,6 +29,7 @@ fn edge(s: &str, t: &str, ty: EdgeType, c: Confidence) -> Edge {
         edge_type: ty,
         confidence: c,
         evidence: vec![],
+        observed: None,
     }
 }
 
@@ -213,5 +214,65 @@ fn report_is_honest_about_single_and_deploy_only() {
 fn report_colours_only_when_asked() {
     assert!(
         format_repo_report(&analyze(&fixture("compose-app")).unwrap(), true).contains('\u{1b}')
+    );
+}
+
+#[test]
+fn runtime_block_serialises_only_what_is_known() {
+    let mut r = Runtime::default();
+    assert_eq!(
+        serde_json::to_value(&r).unwrap(),
+        serde_json::json!({ "connected": false })
+    );
+    r.connected = true;
+    r.source = Some(RuntimeSource::Otel);
+    r.input = Some("traces.prom".into());
+    r.services = Some(RuntimeServices {
+        runtime: 10,
+        matched: 8,
+    });
+    r.mapping = vec![RuntimeMapping {
+        runtime: "checkout-api".into(),
+        service: Some("checkout".into()),
+        how: "normalised".into(),
+    }];
+    r.unmatched = vec!["auth-proxy".into()];
+    r.edges = Some(RuntimeEdges {
+        observed: 4,
+        runtime_only: 1,
+        skipped: 2,
+    });
+    r.warnings = vec!["fuzzy match: chckout -> checkout (0.97)".into()];
+    let json = serde_json::to_value(&r).unwrap();
+    let keys: Vec<&str> = json
+        .as_object()
+        .unwrap()
+        .keys()
+        .map(String::as_str)
+        .collect();
+    assert_eq!(
+        keys,
+        vec![
+            "connected",
+            "source",
+            "input",
+            "services",
+            "mapping",
+            "unmatched",
+            "edges",
+            "warnings"
+        ]
+    );
+    assert_eq!(
+        json["services"],
+        serde_json::json!({ "runtime": 10, "matched": 8 })
+    );
+    assert_eq!(
+        json["edges"],
+        serde_json::json!({ "observed": 4, "runtimeOnly": 1, "skipped": 2 })
+    );
+    assert_eq!(
+        json["mapping"][0],
+        serde_json::json!({ "runtime": "checkout-api", "service": "checkout", "how": "normalised" })
     );
 }
