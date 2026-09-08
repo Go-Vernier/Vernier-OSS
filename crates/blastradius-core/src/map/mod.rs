@@ -7,6 +7,7 @@ pub mod config;
 pub mod facts;
 pub mod matchers;
 pub mod resolve;
+pub mod symbols;
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -21,6 +22,7 @@ use config::ConfigIndex;
 use facts::{Extraction, Part};
 use matchers::FileContext;
 use resolve::{Joins, Resolver, Unresolved};
+use symbols::Symbols;
 
 /// What a matcher found, before it is placed on a service.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -139,12 +141,14 @@ pub fn run(root: &Path, index: &FileIndex, services: &[Service]) -> MapResult {
     }
     stats.parsers.sort_keys();
 
+    let symbols = symbols::build(&extractions);
     let joins = Joins {
         proto_owner: matchers::grpc::proto_owners(&extractions, &config, services),
+        topics: matchers::event::topic_index(&extractions, &config, &symbols),
         ..Joins::default()
     };
     let resolver = Resolver::new(services, &config, joins);
-    let outcomes = collect_outcomes(&extractions, &config, &resolver);
+    let outcomes = collect_outcomes(&extractions, &config, &symbols, &resolver);
     let edges = merge_edges(outcomes, &mut stats);
     MapResult { edges, stats }
 }
@@ -215,6 +219,7 @@ fn extract_all(root: &Path, to_scan: &[(String, String)]) -> Vec<(String, String
 fn collect_outcomes(
     extractions: &[(String, String, Extraction)],
     config: &ConfigIndex,
+    symbols: &Symbols,
     resolver: &Resolver<'_>,
 ) -> Vec<Result<Edge, Unresolved>> {
     let matchers = matchers::all();
@@ -226,6 +231,7 @@ fn collect_outcomes(
                 file,
                 facts: &ex.facts,
                 config,
+                symbols,
             };
             let mut results = Vec::new();
             for matcher in &matchers {

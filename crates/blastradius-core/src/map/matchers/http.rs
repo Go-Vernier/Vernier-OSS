@@ -206,6 +206,7 @@ impl Matcher for Http {
 mod tests {
     use super::*;
     use crate::map::config::ConfigIndex;
+    use crate::map::symbols::Symbols;
     use pretty_assertions::assert_eq;
 
     fn setting(key: &str, value: &str) -> Fact {
@@ -228,11 +229,13 @@ mod tests {
             setting("server.port", "8080"),
         ];
         let cfg = ConfigIndex::default();
+        let symbols = Symbols::default();
         let ctx = FileContext {
             service: "inventory",
             file: "inventory/src/main/resources/application.properties",
             facts: &facts,
             config: &cfg,
+            symbols: &symbols,
         };
         let out = Http.candidates(&ctx);
         let targets: Vec<(&Target, &str)> = out
@@ -262,11 +265,13 @@ mod tests {
             line: 3,
         }];
         let cfg = ConfigIndex::default();
+        let symbols = Symbols::default();
         let ctx = FileContext {
             service: "ledger",
             file: "ledger/appsettings.json",
             facts: &facts,
             config: &cfg,
+            symbols: &symbols,
         };
         let out = Http.candidates(&ctx);
         assert_eq!(out.len(), 1);

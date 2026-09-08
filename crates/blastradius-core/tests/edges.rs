@@ -290,3 +290,76 @@ fn database_edges_from_settings_connection_strings_and_dotenv() {
         json.mapping.unresolved_targets
     );
 }
+
+#[test]
+fn event_edges_join_producers_to_consumers_and_brokers_to_libraries() {
+    let (edges, json) = edges_of("edges-events-app");
+    let e = find(&edges, "payment", "dispatch", EdgeType::Event);
+    assert_eq!(e.confidence, Confidence::Inferred);
+    let files: Vec<&str> = e.evidence.iter().map(|v| v.file.as_str()).collect();
+    assert!(
+        files.contains(&"payment/rabbitmq.py") && files.contains(&"dispatch/main.go"),
+        "{:?}",
+        e.evidence
+    );
+    assert!(
+        e.evidence
+            .iter()
+            .any(|v| v.detail.as_deref() == Some("publishes \"orders\", consumed by dispatch")),
+        "{:?}",
+        e.evidence
+    );
+    assert!(
+        e.evidence
+            .iter()
+            .any(|v| v.detail.as_deref() == Some("consumes \"orders\", published by payment")),
+        "{:?}",
+        e.evidence
+    );
+    find(&edges, "payment", "notifications", EdgeType::Event); // 'email' through Queues.queueName
+    find(&edges, "checkout", "accounting", EdgeType::Event); // kafkajs object literal -> Confluent Subscribe(TopicName)
+    find(&edges, "checkout", "notifications", EdgeType::Event); // @KafkaListener
+    find(&edges, "accounting", "webhooks", EdgeType::Event); // new OrderPaidIntegrationEvent -> AddSubscription<...>
+    for (s, t) in [
+        ("payment", "rabbitmq"),
+        ("dispatch", "rabbitmq"),
+        ("notifications", "rabbitmq"),
+        ("checkout", "kafka"),
+        ("accounting", "kafka"),
+        ("notifications", "kafka"),
+    ] {
+        let e = find(&edges, s, t, EdgeType::Event);
+        assert_eq!(e.confidence, Confidence::Inferred, "{s} -> {t}");
+        assert!(
+            e.evidence[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .starts_with("imports "),
+            "{:?}",
+            e.evidence
+        );
+    }
+    assert!(!edges.iter().any(|e| e.source == e.target));
+    assert!(
+        !edges
+            .iter()
+            .any(|e| e.source == "dispatch" && e.target == "payment"),
+        "no reverse edge"
+    );
+    assert!(
+        json.mapping
+            .unresolved_targets
+            .contains(&"topic:audit-log".to_string()),
+        "{:?}",
+        json.mapping.unresolved_targets
+    );
+    assert!(
+        !json
+            .mapping
+            .unresolved_targets
+            .iter()
+            .any(|t| t == "topic:ok"),
+        "res.send is not a producer"
+    );
+}
