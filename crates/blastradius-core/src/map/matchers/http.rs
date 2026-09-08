@@ -152,7 +152,10 @@ impl Matcher for Http {
                         }
                     }
                 }
-                Fact::Annotation { .. } | Fact::Import { .. } | Fact::Extends { .. } => {}
+                Fact::Annotation { .. }
+                | Fact::Import { .. }
+                | Fact::Extends { .. }
+                | Fact::Setting { .. } => {}
             }
         }
         out

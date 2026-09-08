@@ -32,6 +32,35 @@ static CALL: LazyLock<Regex> = LazyLock::new(|| {
 static IMPORT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r#"^\s*(?:import|require|require_once|include|include_once|use|from|load)\b[^'"\n]*?['"]([^'"]+)['"]"#).unwrap()
 });
+/// `key: value`, `key = value`, `- key: value`, `export KEY=value`; the value
+/// may be quoted; a trailing `# comment` is dropped.
+static SETTING_KV: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"^\s*(?:export\s+|-\s+)?([A-Za-z_][\w.\-]*(?:\[[^\]]*\])?)\s*[:=]\s*(?:"([^"]*)"|'([^']*)'|([^\s#]+))\s*(?:#.*)?$"#,
+    )
+    .unwrap()
+});
+/// `<artifactId>ts-common</artifactId>` on one line.
+static SETTING_XML: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*<([A-Za-z_][\w.\-]*)(?:\s[^>]*)?>([^<]+)</([A-Za-z_][\w.\-]*)>\s*$").unwrap()
+});
+/// Dockerfile `ENV KEY value`, `ENV KEY=value`, `ARG KEY="value"`.
+static SETTING_DOCKER: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r#"^\s*(?:ENV|ARG)\s+([A-Za-z_]\w*)(?:\s*=\s*|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))\s*$"#,
+    )
+    .unwrap()
+});
+/// `name = <expression ending in a string literal>`, with optional modifiers
+/// (`public final static`, `const`, `val`), an optional type before the name
+/// or after a colon, and an optional `self.`/`this.`/`$` prefix. `==` and
+/// `=>` are not assignments.
+static ASSIGN: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(
+        r"^\s*(?:(?:public|private|protected|internal|static|final|readonly|const|var|let|val|export|override|lazy|volatile)\s+)*(?:[A-Za-z_][\w<>\[\]?.,]*\s+)?(?:(?:self|this|cls)\.)?\$?([A-Za-z_]\w*)\s*(?::\s*[\w<>\[\]?.]+)?\s*=\s*([^=>\s].*)$",
+    )
+    .unwrap()
+});
 
 const KEYWORDS: &[&str] = &[
     "if", "elif", "else", "while", "for", "foreach", "switch", "case", "return", "function", "def",
@@ -48,8 +77,100 @@ pub(super) fn extract(text: &str) -> Vec<Fact> {
             continue;
         }
         extract_line(raw, line, &mut facts);
+        let mut bound = setting_line(raw, line);
+        if let Some(assigned) = assignment_line(raw, line) {
+            if bound.as_ref() != Some(&assigned) {
+                bound = bound.or(Some(assigned));
+            }
+        }
+        facts.extend(bound);
     }
     facts
+}
+
+/// Key/value settings from configuration files, one per line at most.
+/// Not yet called outside tests; a produced interface for a later task.
+#[allow(dead_code)]
+pub(super) fn settings(text: &str) -> Vec<Fact> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(i, raw)| setting_line(raw, u32::try_from(i + 1).unwrap_or(u32::MAX)))
+        .collect()
+}
+
+/// Names assigned a string literal, for any language.
+pub(super) fn assignments(text: &str) -> Vec<Fact> {
+    text.lines()
+        .enumerate()
+        .filter_map(|(i, raw)| assignment_line(raw, u32::try_from(i + 1).unwrap_or(u32::MAX)))
+        .collect()
+}
+
+fn quoted_group(caps: &regex::Captures<'_>, first: usize) -> String {
+    caps.get(first)
+        .or_else(|| caps.get(first + 1))
+        .or_else(|| caps.get(first + 2))
+        .map_or("", |m| m.as_str())
+        .to_string()
+}
+
+fn setting_line(raw: &str, line: u32) -> Option<Fact> {
+    let trimmed = raw.trim_start();
+    if trimmed.starts_with('#') || trimmed.starts_with("//") {
+        return None;
+    }
+    if let Some(caps) = SETTING_DOCKER.captures(raw) {
+        return Some(Fact::Setting {
+            key: caps[1].to_string(),
+            value: quoted_group(&caps, 2),
+            line,
+        });
+    }
+    if let Some(caps) = SETTING_XML.captures(raw) {
+        if caps[1] == caps[3] {
+            return Some(Fact::Setting {
+                key: caps[1].to_string(),
+                value: caps[2].trim().to_string(),
+                line,
+            });
+        }
+    }
+    let caps = SETTING_KV.captures(raw)?;
+    let value = quoted_group(&caps, 2);
+    (!value.is_empty()).then(|| Fact::Setting {
+        key: caps[1].to_string(),
+        value,
+        line,
+    })
+}
+
+/// The last string literal on the line is the value, and only when the line
+/// ends with it (ignoring `;`, `,` and closing brackets), so `foo("a").bar()`
+/// binds nothing.
+fn assignment_line(raw: &str, line: u32) -> Option<Fact> {
+    let caps = ASSIGN.captures(raw)?;
+    let name = caps[1].to_string();
+    let rest = caps[2]
+        .trim_end()
+        .trim_end_matches([';', ',', ')', ']', '}'])
+        .trim_end();
+    if !rest.ends_with(['"', '\'', '`']) {
+        return None;
+    }
+    let last = QUOTED.captures_iter(rest).last()?;
+    let value = last
+        .get(1)
+        .or_else(|| last.get(2))
+        .or_else(|| last.get(3))
+        .map_or("", |m| m.as_str());
+    if value.is_empty() {
+        return None;
+    }
+    Some(Fact::Setting {
+        key: name,
+        value: value.to_string(),
+        line,
+    })
 }
 
 fn push_string(value: &str, line: u32, facts: &mut Vec<Fact>) {
