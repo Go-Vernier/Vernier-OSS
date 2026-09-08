@@ -27,15 +27,15 @@ boundaries in about 100 ms each, without configuration:
 ## Status
 
 Phase 0, week 2. This is the open-source CLI described in
-[docs/build-spec.md](docs/build-spec.md). Service discovery and static
-dependency mapping are built. The rest is not, and the report says so instead
-of guessing.
+[docs/build-spec.md](docs/build-spec.md). Service discovery, static
+dependency mapping and the runtime join are built. The rest is not, and the
+report says so instead of guessing.
 
 | Stage | What it does | State |
 | --- | --- | --- |
 | 1. Discover | Find service boundaries: docker-compose, Kubernetes, monorepo layout, workspace config | Built |
 | 2. Map | Static edges: HTTP calls, gRPC stubs, message topics and typed events, shared databases, cross-package imports; datastore and broker hosts found on the way | Built |
-| 3. Join | Optional runtime edges from OpenTelemetry or Datadog, with an explicit name-matching report | Planned |
+| 3. Join | Optional runtime edges from OpenTelemetry (servicegraph scrape or OTLP JSON) or Datadog, with an explicit name-matching report | Built |
 | 4. Report | Blast radius of a change, one PR, or the last N PRs; terminal and self-contained HTML | Planned |
 
 Not yet published. Run it from source with a stable Rust toolchain:
@@ -46,6 +46,8 @@ cd Vernier-OSS
 cargo build --release
 ./target/release/blast-radius analyze /path/to/a/repository
 ./target/release/blast-radius analyze /path/to/a/repository --json
+./target/release/blast-radius analyze /path/to/a/repository --otel traces.prom     # servicegraph scrape or OTLP JSON
+./target/release/blast-radius analyze /path/to/a/repository --datadog deps.json    # saved service_dependencies response
 ```
 
 The engine is Rust. The npm package `blastradius` will wrap the binary when
@@ -204,6 +206,66 @@ the JSON and in the report, never guessed; a topic with a producer but no
 consumer in the repository is listed as `topic:<name>`. An import that
 matches no discovered package is an external library and is not counted.
 
+## How the runtime join works
+
+Static edges say what the code could call. `--otel` and `--datadog` add what
+production actually called. `--otel` takes a Prometheus scrape of the OpenTelemetry
+Collector's servicegraph connector (`traces_service_graph_request_total`) or a raw
+OTLP JSON span export, as a file or a URL; `--datadog` takes a saved
+`service_dependencies` response, or calls the API when given `--dd-env` and the
+`DD_API_KEY` and `DD_APP_KEY` environment variables. Nothing is fetched unless you
+pass a URL or ask for the live call.
+
+Runtime names rarely equal repository names. Each one is matched in order: an
+entry in `blast-radius.config.json` (`{"runtime": {"map": {"checkout-api":
+"checkout"}, "ignore": ["load-generator"]}}`), the exact name, the normalised name
+(`checkout-api`, `CheckoutService` and `checkout` are the same), then a fuzzy match
+that is flagged for you to check. The whole table is printed, and the header says
+how many runtime services matched, so a partial join can never look complete.
+
+Then the merge: a static edge production confirmed becomes Observed and carries
+the call count; a call static analysis missed becomes a new Observed edge; a static
+edge production never took keeps its label and is listed under FINDINGS. Nothing is
+dropped.
+
+With a servicegraph scrape from the fixture repository:
+
+```
+  Runtime       connected (OTel, 8 of 10 runtime services matched)
+
+RUNTIME
+
+  Source        OTel  test/fixtures/runtime-app/runtime/traces.prom
+  Services      8 of 10 runtime services matched
+  Edges         4 observed (3 static confirmed, 1 runtime only) · 2 calls skipped, one end unmatched or ignored
+
+  RUNTIME NAME       SERVICE        HOW
+  catalogue-service  catalogue      normalised
+  chckout            checkout       fuzzy 0.97  (check this)
+  checkout-api       checkout       normalised
+  load-generator     -              ignored (blast-radius.config.json)
+  notifications      notifications  exact
+  orders             orders         exact
+  pay                payment        config
+  payment            payment        exact
+  redis              redis          exact
+
+  1 runtime service matched nothing: auth-proxy
+
+FINDINGS
+
+  Never called by another service        2 services
+    checkout, orders                     (dead, or just quiet?)
+
+  Most connected                         catalogue
+    touched by 1 service
+
+  Shared databases                       0
+
+  Static edges never observed            1
+    orders -> rabbitmq
+```
+
 ## The confidence model
 
 Every edge will carry one of four labels. The weakest label on a path decides
@@ -224,8 +286,7 @@ the label of everything reached through it.
 - **Fail honestly.** If a runtime join matched 6 of 42 services, the report
   header says so. A partial join that looks complete is worse than no join.
 - **No telemetry.** The tool sends nothing anywhere.
-- **Works offline.** The runtime join is opt-in. The static path never makes
-  a network call.
+- **Works offline.** The static path never makes a network call. The runtime join reads a file, or fetches only the URL you give it.
 
 ## Developing
 

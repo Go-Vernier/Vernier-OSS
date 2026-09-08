@@ -255,4 +255,29 @@ source above carries them), Jaeger and Tempo APIs, sampling correction.
 
 ## Decisions made while building
 
-(Appended during implementation.)
+- The `Runtime` struct keeps its name (the spec draft said `RuntimeJoin`); it
+  was already exported, and the block's shape is what matters.
+- The JSON `runtime` block does not repeat the parser method (`otel
+  servicegraph` versus `otlp spans`); `source` plus `input` identify the data,
+  and the evidence detail on each edge names the method.
+- A bare `--datadog` is parsed as an empty string and means "call the API";
+  a value is a file or URL.
+- When two runtime pairs confirm one static edge (`checkout-api -> payment`
+  and the fuzzy `chckout -> payment`), the counts are summed into one
+  `observed` and the single runtime evidence entry is rewritten with the
+  running total, so the table stays one row per edge.
+- `confirmed` in the merge counts is informational; the block reports
+  `observed`, `runtimeOnly` and `skipped`, from which "static confirmed" is
+  `observed - runtimeOnly`.
+- Fuzzy matching runs on normalised names, so `checkout-api` and
+  `CheckoutService` never need the fuzzy tier; it exists for typos and
+  abbreviations (`chckout`, `paymnt`) and is always flagged.
+- `join` takes `RuntimeGraph` by value so the input path can move into the
+  report block rather than being cloned.
+- Matching tests look up rows by runtime name, not input order: `match_names`
+  walks a `BTreeSet`, so the table is sorted.
+- OTLP's `Span.span_id` keeps the protocol field name; clippy's
+  `struct_field_names` is allowed on that struct because renaming it would
+  lie about the export.
+- Edition 2024 makes `std::env::remove_var` unsafe; the live-Datadog unit
+  test wraps the two key removals in an `unsafe` block with a SAFETY comment.
