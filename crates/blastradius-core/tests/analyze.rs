@@ -179,7 +179,7 @@ fn repository_name_falls_back_to_the_directory_name() {
 #[test]
 fn report_shows_findings_and_says_what_is_not_built() {
     let r = format_repo_report(&analyze(&fixture("compose-app")).unwrap(), false);
-    assert!(r.contains("BLAST RADIUS"));
+    assert!(r.contains("VERNIER"));
     assert!(r.contains("2 detected  (docker-compose)"));
     assert!(r.contains("not connected - static only"));
     let re =

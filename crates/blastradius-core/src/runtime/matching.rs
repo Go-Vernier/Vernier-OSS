@@ -66,7 +66,8 @@ pub fn match_names(
         if let Some(target) = config.map.get(name) {
             let Some(service) = services.iter().find(|s| &s.name == target) else {
                 return Err(RuntimeError::Config(format!(
-                    "blast-radius.config.json maps {name} to {target}, which was not discovered"
+                    "{} maps {name} to {target}, which was not discovered",
+                    crate::config::FILE_NAME
                 )));
             };
             out.push(mapping(Some(service), MatchHow::Config));

@@ -1,4 +1,4 @@
-//! `blast-radius`: which services can this change reach?
+//! `vernier`: which services can this change reach?
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
@@ -7,7 +7,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "blast-radius",
+    name = "vernier",
     version,
     about = "Which services can this change reach?"
 )]
@@ -48,7 +48,7 @@ enum Cmd {
 
 fn main() {
     if let Err(err) = run() {
-        eprintln!("blast-radius: {err}");
+        eprintln!("vernier: {err}");
         std::process::exit(1);
     }
 }

@@ -1,8 +1,8 @@
-# Blast Radius
+# Vernier
 
 **Which services can this change reach?**
 
-Blast Radius reads a repository, finds its service boundaries, maps which
+Vernier reads a repository, finds its service boundaries, maps which
 service calls which, and reports what a pull request can affect. It joins two
 things nobody connects today: what the code *could* call (static analysis)
 and what production *actually* calls (traces). Every edge carries evidence
@@ -44,20 +44,19 @@ Not yet published. Run it from source with a stable Rust toolchain:
 git clone https://github.com/Go-Vernier/Vernier-OSS.git
 cd Vernier-OSS
 cargo build --release
-./target/release/blast-radius analyze /path/to/a/repository
-./target/release/blast-radius analyze /path/to/a/repository --json
-./target/release/blast-radius analyze /path/to/a/repository --otel traces.prom     # servicegraph scrape or OTLP JSON
-./target/release/blast-radius analyze /path/to/a/repository --datadog deps.json    # saved service_dependencies response
+./target/release/vernier analyze /path/to/a/repository
+./target/release/vernier analyze /path/to/a/repository --json
+./target/release/vernier analyze /path/to/a/repository --otel traces.prom     # servicegraph scrape or OTLP JSON
+./target/release/vernier analyze /path/to/a/repository --datadog deps.json    # saved service_dependencies response
 ```
 
-The engine is Rust. The npm package `blastradius` will wrap the binary when
-it is published, so it will run as `npx blastradius analyze .` and install
-as `blast-radius`.
+The engine is Rust. An npm package will wrap the binary when it is
+published, so it will install as `vernier` and run as `npx vernier analyze .`.
 
 ## What it looks like
 
 ```
-BLAST RADIUS
+VERNIER
 
   Repository    instana/robot-shop
   Services      11 detected  (docker-compose)
@@ -217,7 +216,7 @@ OTLP JSON span export, as a file or a URL; `--datadog` takes a saved
 pass a URL or ask for the live call.
 
 Runtime names rarely equal repository names. Each one is matched in order: an
-entry in `blast-radius.config.json` (`{"runtime": {"map": {"checkout-api":
+entry in `vernier.config.json` (`{"runtime": {"map": {"checkout-api":
 "checkout"}, "ignore": ["load-generator"]}}`), the exact name, the normalised name
 (`checkout-api`, `CheckoutService` and `checkout` are the same), then a fuzzy match
 that is flagged for you to check. The whole table is printed, and the header says
@@ -236,14 +235,14 @@ With a servicegraph scrape from the fixture repository:
 RUNTIME
 
   Source        OTel  test/fixtures/runtime-app/runtime/traces.prom
-  Services      8 of 10 runtime services matched (1 ignored by blast-radius.config.json)
+  Services      8 of 10 runtime services matched (1 ignored by vernier.config.json)
   Edges         4 observed (3 static confirmed, 1 runtime only) · 2 calls skipped, one end unmatched or ignored
 
   RUNTIME NAME       SERVICE        HOW
   catalogue-service  catalogue      normalised
   chckout            checkout       fuzzy 0.97  (check this)
   checkout-api       checkout       normalised
-  load-generator     -              ignored (blast-radius.config.json)
+  load-generator     -              ignored (vernier.config.json)
   notifications      notifications  exact
   orders             orders         exact
   pay                payment        config
@@ -312,11 +311,12 @@ let analysis = analyze(std::path::Path::new("./my-repo"))?;
 println!("{}", format_repo_report(&analysis, false));
 ```
 
-## Relationship to Vernier
+## Part of Vernier
 
-Blast Radius is built by the team behind [Vernier](https://github.com/Go-Vernier),
-a behavioural verification platform. Vernier reasons about behaviours inside
-one repository. Blast Radius reasons about reach across services. They share
+This CLI is the open-source part of [Vernier](https://github.com/Go-Vernier),
+a behavioural verification platform. The platform reasons about behaviours
+inside one repository; this tool reasons about reach across services, and
+the blast radius of a change is the number it exists to report. They share
 the same idea: every claim carries its evidence and its confidence.
 
 ## Licence

@@ -276,7 +276,7 @@ fn report_with_a_runtime_source_shows_the_join() {
     );
     assert!(
         regex::Regex::new(
-            r"Services\s+8 of 10 runtime services matched \(1 ignored by blast-radius\.config\.json\)"
+            r"Services\s+8 of 10 runtime services matched \(1 ignored by vernier\.config\.json\)"
         )
         .unwrap()
         .is_match(&r),
@@ -303,7 +303,7 @@ fn report_with_a_runtime_source_shows_the_join() {
         "{r}"
     );
     assert!(
-        regex::Regex::new(r"load-generator\s+-\s+ignored \(blast-radius\.config\.json\)")
+        regex::Regex::new(r"load-generator\s+-\s+ignored \(vernier\.config\.json\)")
             .unwrap()
             .is_match(&r),
         "{r}"
@@ -469,7 +469,7 @@ fn never_observed_leaves_out_shared_databases_and_imports_and_ignores_do_not_war
     // Two matched plus one ignored is every runtime name accounted for: no partial-join wording.
     assert!(r.contains("connected (OTel, 2 services matched)"), "{r}");
     assert!(
-        r.contains("2 of 3 runtime services matched (1 ignored by blast-radius.config.json)"),
+        r.contains("2 of 3 runtime services matched (1 ignored by vernier.config.json)"),
         "{r}"
     );
 }

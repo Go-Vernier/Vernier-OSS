@@ -49,7 +49,7 @@ pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
         .collect();
     let mut out: Vec<String> = Vec::new();
 
-    out.push(c.bold("BLAST RADIUS"));
+    out.push(c.bold("VERNIER"));
     out.push(String::new());
     out.push(row("Repository", &analysis.repository));
     let detected = match analysis.discovery.strategy {
@@ -71,7 +71,7 @@ pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
                     "This repository declares {} services but builds none of them here,",
                     infra.len()
                 ),
-                "so there is no code to trace. Run blast-radius on the repository that".to_string(),
+                "so there is no code to trace. Run vernier on the repository that".to_string(),
                 "holds the services.".to_string(),
             ]
         } else {
@@ -358,7 +358,7 @@ fn runtime_section(analysis: &Analysis, c: &Paint, out: &mut Vec<String>) {
     let ignored = ignored_count(analysis);
     let ignored_note = match ignored {
         0 => String::new(),
-        n => format!(" ({n} ignored by blast-radius.config.json)"),
+        n => format!(" ({n} ignored by {})", crate::config::FILE_NAME),
     };
     out.push(row(
         "Services",
@@ -403,7 +403,7 @@ fn runtime_section(analysis: &Analysis, c: &Paint, out: &mut Vec<String>) {
     ));
     for m in r.mapping.iter().filter(|m| m.how != "unmatched") {
         let how = match m.how.as_str() {
-            "ignored" => "ignored (blast-radius.config.json)".to_string(),
+            "ignored" => format!("ignored ({})", crate::config::FILE_NAME),
             h if h.starts_with("fuzzy") => format!("{h}  (check this)"),
             h => h.to_string(),
         };

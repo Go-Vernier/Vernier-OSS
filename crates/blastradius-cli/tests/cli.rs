@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_blast-radius"))
+    Command::new(env!("CARGO_BIN_EXE_vernier"))
 }
 
 fn fixture(name: &str) -> PathBuf {
@@ -67,14 +67,14 @@ fn errors_go_to_stderr_with_exit_code_1() {
         .unwrap();
     assert_eq!(out.status.code(), Some(1));
     let err = String::from_utf8_lossy(&out.stderr);
-    assert!(err.starts_with("blast-radius: not a directory"), "{err}");
+    assert!(err.starts_with("vernier: not a directory"), "{err}");
     assert!(out.stdout.is_empty());
 }
 
 #[test]
 fn version_flag() {
     let out = bin().arg("--version").output().unwrap();
-    assert!(String::from_utf8_lossy(&out.stdout).starts_with("blast-radius 0.0.1"));
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("vernier 0.0.1"));
 }
 
 fn runtime_fixture(file: &str) -> String {

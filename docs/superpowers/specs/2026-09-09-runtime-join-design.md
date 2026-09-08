@@ -20,12 +20,12 @@ optional fetch, `strsim` for fuzzy name matching.
 ## CLI
 
 ```bash
-blast-radius analyze . --otel traces.prom                # Prometheus text scrape, servicegraph metric
-blast-radius analyze . --otel spans.json                 # OTLP JSON span export
-blast-radius analyze . --otel http://collector:8889/metrics
-blast-radius analyze . --datadog deps.json               # saved GET /api/v1/service_dependencies
-blast-radius analyze . --datadog --dd-env prod           # live, keys from DD_API_KEY and DD_APP_KEY
-blast-radius analyze . --datadog --dd-env prod --dd-site datadoghq.eu
+vernier analyze . --otel traces.prom                # Prometheus text scrape, servicegraph metric
+vernier analyze . --otel spans.json                 # OTLP JSON span export
+vernier analyze . --otel http://collector:8889/metrics
+vernier analyze . --datadog deps.json               # saved GET /api/v1/service_dependencies
+vernier analyze . --datadog --dd-env prod           # live, keys from DD_API_KEY and DD_APP_KEY
+vernier analyze . --datadog --dd-env prod --dd-site datadoghq.eu
 ```
 
 `--otel` and `--datadog` are mutually exclusive in this stage. `--otel`
@@ -95,7 +95,7 @@ tier that answers wins:
 
 | Tier | Rule | Reported as |
 | --- | --- | --- |
-| config | `blast-radius.config.json` at the repository root: `{"runtime": {"map": {"checkout-api": "checkout"}, "ignore": ["load-generator"]}}` | `config`, or `ignored` |
+| config | `vernier.config.json` at the repository root: `{"runtime": {"map": {"checkout-api": "checkout"}, "ignore": ["load-generator"]}}` | `config`, or `ignored` |
 | exact | the runtime name equals a discovered service's name | `exact` |
 | normalised | `normalise()` from discovery (lowercase, drop `-_.`, strip a trailing `service`, `svc`, `api`, `server`, `deployment`, `deploy`) equal on both sides | `normalised` |
 | fuzzy | Jaro–Winkler similarity of the normalised names ≥ 0.9, both at least four characters; the best-scoring service wins | `fuzzy 0.93`, and a warning |
@@ -181,7 +181,7 @@ RUNTIME
   RUNTIME NAME    SERVICE    HOW
   checkout-api    checkout   normalised
   chckout         checkout   fuzzy 0.93  (check this)
-  load-generator  -          ignored (blast-radius.config.json)
+  load-generator  -          ignored (vernier.config.json)
   pay             payment    config
 
   36 runtime services matched nothing: auth-proxy, billing-legacy, ...
@@ -193,7 +193,7 @@ so a code path production never took is visible.
 
 ## Configuration file
 
-`blast-radius.config.json` at the repository root, read only when a runtime
+`vernier.config.json` at the repository root, read only when a runtime
 source is given:
 
 ```json
@@ -213,7 +213,7 @@ crates/blastradius-core/src/runtime/datadog.rs    parse(text) -> RuntimeGraph; r
 crates/blastradius-core/src/runtime/fetch.rs      read(input) -> String: file or URL (ureq), Datadog live call
 crates/blastradius-core/src/runtime/matching.rs   match_names(runtime services, discovered services, config) -> Vec<Mapping>
 crates/blastradius-core/src/runtime/merge.rs      apply(graph, calls, mapping) -> counts; edge promotion and new edges
-crates/blastradius-core/src/config.rs             blast-radius.config.json
+crates/blastradius-core/src/config.rs             vernier.config.json
 crates/blastradius-core/src/model.rs              Edge.observed
 crates/blastradius-core/src/analyze.rs            Runtime replaced by RuntimeJoin (serialises to the block above)
 crates/blastradius-core/src/report.rs             header, RUNTIME section, FINDINGS line
@@ -230,7 +230,7 @@ The library exposes the same two calls.
   `payment`, `catalogue`, `orders`, `notifications`, a `rabbitmq` image and a
   `redis` image; sources giving static edges `checkout → payment` (http),
   `checkout → catalogue` (http), `orders → rabbitmq` (event),
-  `payment → redis` (database); `blast-radius.config.json` mapping `pay` to
+  `payment → redis` (database); `vernier.config.json` mapping `pay` to
   `payment` and ignoring `load-generator`; `runtime/traces.prom`,
   `runtime/spans.json`, `runtime/datadog.json`.
 - `traces.prom` exercises every tier and rule: `checkout-api → payment`
@@ -290,3 +290,8 @@ source above carries them), Jaeger and Tempo APIs, sampling correction.
   observed" leaves out shared-database edges between two code services,
   which are not calls and can never be observed; an `--otel` file that is
   really a Datadog response says so and points at `--datadog`.
+- The command is `vernier` (`vernier analyze . --otel traces.prom`), the report
+  banner is `VERNIER` and the config file is `vernier.config.json`: the CLI
+  is Vernier's open-source part, and "blast radius" names the number it
+  reports, not the tool. Crate names (`blastradius-core`, `blastradius-cli`)
+  and the reserved npm name are unchanged; they are not user-facing.

@@ -1,4 +1,4 @@
-//! Blast Radius: which services can this change reach?
+//! Vernier: which services can this change reach?
 //!
 //! Stage 1, discovery, finds the service boundaries in a repository. Later
 //! stages add static edges, the runtime join and the blast radius itself.

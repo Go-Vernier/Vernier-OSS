@@ -1,7 +1,7 @@
 #!/bin/sh
 # Shallow-clones the test corpus into ./corpus (gitignored).
 # Real multi-service repositories with genuine service boundaries.
-# Every change to blast-radius should run against all of them.
+# Every change to vernier should run against all of them.
 set -e
 cd "$(dirname "$0")/.."
 mkdir -p corpus
