@@ -253,3 +253,72 @@ fn json_contract_with_a_runtime_source() {
         "the static-only edge has no observed key"
     );
 }
+
+#[test]
+fn report_with_a_runtime_source_shows_the_join() {
+    let r = format_repo_report(&joined("traces.prom"), false);
+    assert!(
+        r.contains("connected (OTel, 8 of 10 runtime services matched)"),
+        "{r}"
+    );
+    assert!(r.contains("\nRUNTIME\n"), "{r}");
+    assert!(
+        regex::Regex::new(r"Source\s+OTel\s+traces\.prom")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(
+            r"Edges\s+4 observed \(3 static confirmed, 1 runtime only\) · 2 calls skipped"
+        )
+        .unwrap()
+        .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"chckout\s+checkout\s+fuzzy 0\.97\s+\(check this\)")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"load-generator\s+-\s+ignored \(blast-radius\.config\.json\)")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"pay\s+payment\s+config")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        r.contains("1 runtime service matched nothing: auth-proxy"),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"checkout\s+->\s+payment\s+http\s+observed")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"Static edges never observed\s+1")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(r.contains("orders -> rabbitmq"), "{r}");
+}
+
+#[test]
+fn report_without_a_runtime_source_is_unchanged() {
+    let r = format_repo_report(&analyze(&fixture("runtime-app")).unwrap(), false);
+    assert!(r.contains("not connected - static only"), "{r}");
+    assert!(
+        !r.contains("RUNTIME\n") && !r.contains("never observed"),
+        "{r}"
+    );
+}
