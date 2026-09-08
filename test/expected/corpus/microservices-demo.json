@@ -1,0 +1,98 @@
+{
+  "strategy": "kubernetes",
+  "code": [
+    "adservice",
+    "checkoutservice",
+    "currencyservice",
+    "emailservice",
+    "frontend",
+    "loadgenerator",
+    "paymentservice",
+    "productcatalogservice",
+    "recommendationservice",
+    "shippingservice",
+    "shoppingassistantservice"
+  ],
+  "infrastructure": [
+    "cartservice",
+    "frontend-external",
+    "redis-cart"
+  ],
+  "edges": [
+    {
+      "source": "frontend",
+      "target": "adservice",
+      "type": "grpc"
+    },
+    {
+      "source": "frontend",
+      "target": "cartservice",
+      "type": "grpc"
+    },
+    {
+      "source": "frontend",
+      "target": "checkoutservice",
+      "type": "grpc"
+    },
+    {
+      "source": "frontend",
+      "target": "currencyservice",
+      "type": "grpc"
+    },
+    {
+      "source": "frontend",
+      "target": "productcatalogservice",
+      "type": "grpc"
+    },
+    {
+      "source": "frontend",
+      "target": "recommendationservice",
+      "type": "grpc"
+    },
+    {
+      "source": "frontend",
+      "target": "shippingservice",
+      "type": "grpc"
+    },
+    {
+      "source": "checkoutservice",
+      "target": "cartservice",
+      "type": "grpc"
+    },
+    {
+      "source": "checkoutservice",
+      "target": "currencyservice",
+      "type": "grpc"
+    },
+    {
+      "source": "checkoutservice",
+      "target": "emailservice",
+      "type": "grpc"
+    },
+    {
+      "source": "checkoutservice",
+      "target": "paymentservice",
+      "type": "grpc"
+    },
+    {
+      "source": "checkoutservice",
+      "target": "productcatalogservice",
+      "type": "grpc"
+    },
+    {
+      "source": "checkoutservice",
+      "target": "shippingservice",
+      "type": "grpc"
+    },
+    {
+      "source": "recommendationservice",
+      "target": "productcatalogservice",
+      "type": "grpc"
+    },
+    {
+      "source": "loadgenerator",
+      "target": "frontend",
+      "type": "http"
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "strategy": "docker-compose",
+  "code": [
+    "catalog",
+    "customer",
+    "eureka",
+    "order",
+    "turbine",
+    "zuul"
+  ],
+  "infrastructure": []
+}
