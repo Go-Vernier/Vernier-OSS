@@ -245,6 +245,49 @@ fn report_without_edges_says_none_were_found() {
 }
 
 #[test]
+fn report_lists_shared_databases() {
+    let r = format_repo_report(&analyze(&fixture("edges-db-app")).unwrap(), false);
+    assert!(
+        regex::Regex::new(r"Shared databases\s+2")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"ledgerdb\s+audit, ledger")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"mysql/shop\s+orders, reports")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        !r.contains("localhost/ledgerdb"),
+        "one key per pair, the named resource wins: {r}"
+    );
+}
+
+#[test]
+fn report_without_shared_databases_says_so_and_names_every_edge_type() {
+    let r = format_repo_report(&analyze(&fixture("edges-http-app")).unwrap(), false);
+    assert!(
+        regex::Regex::new(r"Shared databases\s+0")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    let r = format_repo_report(&analyze(&fixture("compose-app")).unwrap(), false);
+    assert!(
+        r.contains("No static edges found: no HTTP, gRPC, event, database or import edge to another discovered service was recognised."),
+        "{r}"
+    );
+}
+
+#[test]
 fn database_edges_from_settings_connection_strings_and_dotenv() {
     let (edges, json) = edges_of("edges-db-app");
     let e = find(&edges, "inventory", "mongodb", EdgeType::Database);
