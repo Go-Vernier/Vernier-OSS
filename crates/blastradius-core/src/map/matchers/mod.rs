@@ -1,5 +1,6 @@
 //! Matchers turn the facts of one file into candidates. Each names what it
 //! found; the resolver decides which service that is.
+pub mod database;
 pub mod event;
 pub mod grpc;
 pub mod http;
@@ -27,5 +28,6 @@ pub fn all() -> Vec<Box<dyn Matcher>> {
         Box::new(http::Http),
         Box::new(grpc::Grpc),
         Box::new(event::Event),
+        Box::new(database::Database),
     ]
 }

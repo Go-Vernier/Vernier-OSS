@@ -89,7 +89,7 @@ const BROKERS: &[&str] = &[
 const EVENT_SCHEMES: &[&str] = &[
     "amqp", "amqps", "kafka", "nats", "mqtt", "mqtts", "stomp", "sqs", "pulsar",
 ];
-const DATABASE_SCHEMES: &[&str] = &[
+pub(crate) const DATABASE_SCHEMES: &[&str] = &[
     "mongodb",
     "mongodb+srv",
     "postgres",

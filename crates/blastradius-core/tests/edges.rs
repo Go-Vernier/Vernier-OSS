@@ -292,6 +292,47 @@ fn database_edges_from_settings_connection_strings_and_dotenv() {
 }
 
 #[test]
+fn shared_databases_join_services_in_both_directions() {
+    let (edges, _) = edges_of("edges-db-app");
+    for (s, t, key) in [
+        ("orders", "reports", "mysql/shop"),
+        ("reports", "orders", "mysql/shop"),
+        ("ledger", "audit", "ledgerdb"),
+        ("audit", "ledger", "ledgerdb"),
+    ] {
+        let e = find(&edges, s, t, EdgeType::Database);
+        assert_eq!(e.confidence, Confidence::Inferred, "{s} -> {t}");
+        assert!(
+            e.evidence
+                .iter()
+                .any(|v| v.detail.as_deref() == Some(&format!("shared database {key} with {t}"))),
+            "{s} -> {t}: {:?}",
+            e.evidence
+        );
+    }
+    let e = find(&edges, "ledger", "audit", EdgeType::Database);
+    assert!(
+        e.evidence
+            .iter()
+            .any(|v| v.detail.as_deref() == Some("shared database localhost/ledgerdb with audit")),
+        "the development connection strings share the same key too: {:?}",
+        e.evidence
+    );
+    assert!(
+        !edges.iter().any(|e| e.edge_type == EdgeType::Database
+            && e.source == "catalogue"
+            && e.target == "user"),
+        "same host, different databases: not shared"
+    );
+    assert!(
+        !edges.iter().any(|e| e.edge_type == EdgeType::Database
+            && e.source == "reports"
+            && e.target == "ledger"),
+        "postgres host alone is not a key"
+    );
+}
+
+#[test]
 fn event_edges_join_producers_to_consumers_and_brokers_to_libraries() {
     let (edges, json) = edges_of("edges-events-app");
     let e = find(&edges, "payment", "dispatch", EdgeType::Event);

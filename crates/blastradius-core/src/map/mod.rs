@@ -145,7 +145,7 @@ pub fn run(root: &Path, index: &FileIndex, services: &[Service]) -> MapResult {
     let joins = Joins {
         proto_owner: matchers::grpc::proto_owners(&extractions, &config, services),
         topics: matchers::event::topic_index(&extractions, &config, &symbols),
-        ..Joins::default()
+        databases: matchers::database::database_index(&extractions, &config, &symbols),
     };
     let resolver = Resolver::new(services, &config, joins);
     let outcomes = collect_outcomes(&extractions, &config, &symbols, &resolver);
