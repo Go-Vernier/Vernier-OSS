@@ -3,6 +3,7 @@
 //! service dependency map, matched to the discovered services and merged
 //! into the graph. Every source produces the same `RuntimeGraph`.
 pub mod datadog;
+pub mod matching;
 pub mod otlp;
 pub mod prometheus;
 

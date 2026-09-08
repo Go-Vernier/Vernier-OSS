@@ -1,0 +1,7 @@
+{
+  "runtime": {
+    "map": { "pay": "payment" },
+    "ignore": ["load-generator"]
+  },
+  "future": { "ignored": true }
+}

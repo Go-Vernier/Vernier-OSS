@@ -5,6 +5,7 @@
 //! Every service and edge carries evidence and a confidence label. The JSON
 //! printed by [`Analysis::to_json`] is the contract other tools consume.
 pub mod analyze;
+pub mod config;
 pub mod discover;
 pub mod fs;
 pub mod graph;
@@ -18,6 +19,7 @@ pub use analyze::{
     Analysis, AnalysisJson, AnalyzeError, Discovery, Runtime, RuntimeEdges, RuntimeMapping,
     RuntimeServices, analyze, repository_name,
 };
+pub use config::{Config, ConfigError, RuntimeConfig};
 pub use graph::{BlastGraph, GraphError};
 pub use map::MappingStats;
 pub use model::*;
