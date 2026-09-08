@@ -24,6 +24,7 @@ thiserror.workspace = true
 owo-colors.workspace = true
 rayon.workspace = true
 strsim.workspace = true
+ureq.workspace = true
 tree-sitter.workspace = true
 tree-sitter-javascript.workspace = true
 tree-sitter-typescript.workspace = true

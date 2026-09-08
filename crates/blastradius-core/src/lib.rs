@@ -24,4 +24,4 @@ pub use graph::{BlastGraph, GraphError};
 pub use map::MappingStats;
 pub use model::*;
 pub use report::format_repo_report;
-pub use runtime::{RuntimeCall, RuntimeError, RuntimeGraph, RuntimeKind};
+pub use runtime::{RuntimeCall, RuntimeError, RuntimeGraph, RuntimeInput, RuntimeKind};

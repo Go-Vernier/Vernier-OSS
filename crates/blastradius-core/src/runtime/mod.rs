@@ -3,6 +3,7 @@
 //! service dependency map, matched to the discovered services and merged
 //! into the graph. Every source produces the same `RuntimeGraph`.
 pub mod datadog;
+pub mod fetch;
 pub mod matching;
 pub mod merge;
 pub mod otlp;
@@ -159,6 +160,44 @@ pub fn join(
     Ok(())
 }
 
+/// What the CLI asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RuntimeInput {
+    /// A path or URL holding a servicegraph scrape or an OTLP JSON export.
+    Otel(String),
+    /// A path or URL holding a saved `service_dependencies` response.
+    DatadogFile(String),
+    /// Call the Datadog API for this site and environment.
+    DatadogLive { site: String, env: String },
+}
+
+/// An `--otel` input by its shape: JSON is an OTLP export, text with the
+/// servicegraph metric is a Prometheus scrape.
+pub fn detect(text: &str, input: &str) -> Result<RuntimeGraph, RuntimeError> {
+    let trimmed = text.trim_start();
+    if trimmed.starts_with('{') {
+        return otlp::parse(text, input);
+    }
+    if prometheus::is_prometheus(text) {
+        return prometheus::parse(text, input);
+    }
+    Err(RuntimeError::Unsupported(format!(
+        "{input} is neither a Prometheus scrape with {} nor an OTLP JSON export",
+        prometheus::METRIC
+    )))
+}
+
+pub fn load(input: &RuntimeInput) -> Result<RuntimeGraph, RuntimeError> {
+    match input {
+        RuntimeInput::Otel(source) => detect(&fetch::read(source)?, source),
+        RuntimeInput::DatadogFile(source) => datadog::parse(&fetch::read(source)?, source),
+        RuntimeInput::DatadogLive { site, env } => {
+            let text = fetch::datadog_live(site, env)?;
+            datadog::parse(&text, &format!("datadog env {env}"))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -201,5 +240,43 @@ mod tests {
         d.record("a", "b", None, RuntimeKind::Unknown);
         d.record("a", "b", None, RuntimeKind::Unknown);
         assert_eq!(d.calls[0].calls, None);
+    }
+
+    #[test]
+    fn detects_the_shape_of_an_otel_input() {
+        let prom = "traces_service_graph_request_total{client=\"a\",server=\"b\"} 1\n";
+        assert_eq!(detect(prom, "x.prom").unwrap().method, "otel servicegraph");
+        let otlp = r#"{"resourceSpans":[{"resource":{"attributes":[{"key":"service.name","value":{"stringValue":"a"}}]},"scopeSpans":[{"spans":[{"spanId":"1","parentSpanId":"","kind":3,"attributes":[{"key":"peer.service","value":{"stringValue":"b"}}]}]}]}]}"#;
+        assert_eq!(detect(otlp, "x.json").unwrap().method, "otlp spans");
+        let err = detect("hello\n", "x.txt").unwrap_err();
+        assert!(matches!(err, RuntimeError::Unsupported(_)), "{err}");
+        assert!(
+            err.to_string()
+                .contains("traces_service_graph_request_total")
+                && err.to_string().contains("OTLP"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn load_reads_files_and_reports_missing_ones() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../test/fixtures/runtime-app/runtime");
+        let g = load(&RuntimeInput::Otel(
+            root.join("traces.prom").display().to_string(),
+        ))
+        .unwrap();
+        assert_eq!(g.method, "otel servicegraph");
+        let g = load(&RuntimeInput::DatadogFile(
+            root.join("datadog.json").display().to_string(),
+        ))
+        .unwrap();
+        assert_eq!(g.source, RuntimeSource::Datadog);
+        let err = load(&RuntimeInput::Otel("/nonexistent/traces.prom".into())).unwrap_err();
+        assert!(matches!(err, RuntimeError::Io { .. }), "{err}");
+        assert!(
+            err.to_string().contains("/nonexistent/traces.prom"),
+            "{err}"
+        );
     }
 }
