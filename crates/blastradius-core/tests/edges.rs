@@ -243,3 +243,270 @@ fn report_without_edges_says_none_were_found() {
     assert!(r.contains("No static edges found"), "{r}");
     assert!(!r.contains("EDGES") && !r.contains("FINDINGS"), "{r}");
 }
+
+#[test]
+fn report_lists_shared_databases() {
+    let r = format_repo_report(&analyze(&fixture("edges-db-app")).unwrap(), false);
+    assert!(
+        regex::Regex::new(r"Shared databases\s+2")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"ledgerdb\s+audit, ledger")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"mysql/shop\s+orders, reports")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        !r.contains("localhost/ledgerdb"),
+        "one key per pair, the named resource wins: {r}"
+    );
+}
+
+#[test]
+fn report_without_shared_databases_says_so_and_names_every_edge_type() {
+    let r = format_repo_report(&analyze(&fixture("edges-http-app")).unwrap(), false);
+    assert!(
+        regex::Regex::new(r"Shared databases\s+0")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    let r = format_repo_report(&analyze(&fixture("compose-app")).unwrap(), false);
+    assert!(
+        r.contains("No static edges found: no HTTP, gRPC, event, database or import edge to another discovered service was recognised."),
+        "{r}"
+    );
+}
+
+#[test]
+fn database_edges_from_settings_connection_strings_and_dotenv() {
+    let (edges, json) = edges_of("edges-db-app");
+    let e = find(&edges, "inventory", "mongodb", EdgeType::Database);
+    assert_eq!(e.confidence, Confidence::Static);
+    assert_eq!(
+        e.evidence[0].detail.as_deref(),
+        Some("spring.data.mongodb.host=mongodb")
+    );
+    let e = find(&edges, "cart", "valkey-cart", EdgeType::Database);
+    assert_eq!(e.confidence, Confidence::Static);
+    assert!(
+        e.evidence[0]
+            .detail
+            .as_deref()
+            .unwrap()
+            .starts_with("VALKEY_ADDR=valkey-cart:6379 via docker-compose.yml:"),
+        "{:?}",
+        e.evidence
+    );
+    let e = find(&edges, "reports", "postgres", EdgeType::Database);
+    assert!(
+        e.evidence[0]
+            .detail
+            .as_deref()
+            .unwrap()
+            .starts_with("DB_CONNECTION_STRING=postgres://app:secret@postgres/shop"),
+        "{:?}",
+        e.evidence
+    );
+    find(&edges, "reports", "mysql", EdgeType::Database);
+    find(&edges, "orders", "mysql", EdgeType::Database);
+    find(&edges, "catalogue", "mongodb", EdgeType::Database);
+    find(&edges, "user", "mongodb", EdgeType::Database);
+    assert!(
+        !edges.iter().any(|e| e.target == "localhost"),
+        "{:?}",
+        edges.iter().map(triple).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        json.mapping.unresolved_targets,
+        Vec::<String>::new(),
+        "{:?}",
+        json.mapping.unresolved_targets
+    );
+}
+
+#[test]
+fn shared_databases_join_services_in_both_directions() {
+    let (edges, _) = edges_of("edges-db-app");
+    for (s, t, key) in [
+        ("orders", "reports", "mysql/shop"),
+        ("reports", "orders", "mysql/shop"),
+        ("ledger", "audit", "ledgerdb"),
+        ("audit", "ledger", "ledgerdb"),
+    ] {
+        let e = find(&edges, s, t, EdgeType::Database);
+        assert_eq!(e.confidence, Confidence::Inferred, "{s} -> {t}");
+        assert!(
+            e.evidence
+                .iter()
+                .any(|v| v.detail.as_deref() == Some(&format!("shared database {key} with {t}"))),
+            "{s} -> {t}: {:?}",
+            e.evidence
+        );
+    }
+    let e = find(&edges, "ledger", "audit", EdgeType::Database);
+    assert!(
+        e.evidence
+            .iter()
+            .any(|v| v.detail.as_deref() == Some("shared database localhost/ledgerdb with audit")),
+        "the development connection strings share the same key too: {:?}",
+        e.evidence
+    );
+    assert!(
+        !edges.iter().any(|e| e.edge_type == EdgeType::Database
+            && e.source == "catalogue"
+            && e.target == "user"),
+        "same host, different databases: not shared"
+    );
+    assert!(
+        !edges.iter().any(|e| e.edge_type == EdgeType::Database
+            && e.source == "reports"
+            && e.target == "ledger"),
+        "postgres host alone is not a key"
+    );
+}
+
+#[test]
+fn event_edges_join_producers_to_consumers_and_brokers_to_libraries() {
+    let (edges, json) = edges_of("edges-events-app");
+    let e = find(&edges, "payment", "dispatch", EdgeType::Event);
+    assert_eq!(e.confidence, Confidence::Inferred);
+    let files: Vec<&str> = e.evidence.iter().map(|v| v.file.as_str()).collect();
+    assert!(
+        files.contains(&"payment/rabbitmq.py") && files.contains(&"dispatch/main.go"),
+        "{:?}",
+        e.evidence
+    );
+    assert!(
+        e.evidence
+            .iter()
+            .any(|v| v.detail.as_deref() == Some("publishes \"orders\", consumed by dispatch")),
+        "{:?}",
+        e.evidence
+    );
+    assert!(
+        e.evidence
+            .iter()
+            .any(|v| v.detail.as_deref() == Some("consumes \"orders\", published by payment")),
+        "{:?}",
+        e.evidence
+    );
+    find(&edges, "payment", "notifications", EdgeType::Event); // 'email' through Queues.queueName
+    find(&edges, "checkout", "accounting", EdgeType::Event); // kafkajs object literal -> Confluent Subscribe(TopicName)
+    find(&edges, "checkout", "notifications", EdgeType::Event); // @KafkaListener
+    find(&edges, "accounting", "webhooks", EdgeType::Event); // new OrderPaidIntegrationEvent -> AddSubscription<...>
+    for (s, t) in [
+        ("payment", "rabbitmq"),
+        ("dispatch", "rabbitmq"),
+        ("notifications", "rabbitmq"),
+        ("checkout", "kafka"),
+        ("accounting", "kafka"),
+        ("notifications", "kafka"),
+    ] {
+        let e = find(&edges, s, t, EdgeType::Event);
+        assert_eq!(e.confidence, Confidence::Inferred, "{s} -> {t}");
+        assert!(
+            e.evidence[0]
+                .detail
+                .as_deref()
+                .unwrap()
+                .starts_with("imports "),
+            "{:?}",
+            e.evidence
+        );
+    }
+    assert!(!edges.iter().any(|e| e.source == e.target));
+    assert!(
+        !edges
+            .iter()
+            .any(|e| e.source == "dispatch" && e.target == "payment"),
+        "no reverse edge"
+    );
+    assert!(
+        json.mapping
+            .unresolved_targets
+            .contains(&"topic:audit-log".to_string()),
+        "{:?}",
+        json.mapping.unresolved_targets
+    );
+    assert!(
+        !json
+            .mapping
+            .unresolved_targets
+            .iter()
+            .any(|t| t == "topic:ok"),
+        "res.send is not a producer"
+    );
+}
+
+#[test]
+fn import_edges_from_imports_dependencies_and_project_references() {
+    let (edges, json) = edges_of("edges-import-app");
+    let e = find(&edges, "web", "shared", EdgeType::Import);
+    assert_eq!(e.confidence, Confidence::Static);
+    let details: Vec<&str> = e
+        .evidence
+        .iter()
+        .filter_map(|v| v.detail.as_deref())
+        .collect();
+    assert!(
+        details.contains(&"import @acme/shared/utils"),
+        "{details:?}"
+    );
+    assert!(details.contains(&"dependency @acme/shared"), "{details:?}");
+    assert_eq!(
+        find(&edges, "checkout", "cart", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("import github.com/acme/demo/services/cart/genproto")
+    );
+    assert_eq!(
+        find(&edges, "basket-api", "eventbus", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("ProjectReference ..\\eventbus\\EventBus.csproj")
+    );
+    assert_eq!(
+        find(&edges, "orders", "common", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("artifactId common")
+    );
+    assert_eq!(
+        find(&edges, "indexer", "core-rs", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("path ../core-rs")
+    );
+    assert_eq!(
+        find(&edges, "worker", "shared_py", EdgeType::Import).evidence[0]
+            .detail
+            .as_deref(),
+        Some("import shared_py.tasks")
+    );
+    assert!(
+        edges.iter().all(|e| e.edge_type == EdgeType::Import),
+        "{:?}",
+        edges.iter().map(triple).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        edges.len(),
+        6,
+        "{:?}",
+        edges.iter().map(triple).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        json.mapping.unresolved, 0,
+        "external libraries are not unresolved targets: {:?}",
+        json.mapping.unresolved_targets
+    );
+}

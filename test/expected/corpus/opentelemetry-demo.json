@@ -1,0 +1,35 @@
+{
+  "strategy": "docker-compose",
+  "code": [
+    "ad",
+    "cart",
+    "checkout",
+    "currency",
+    "email",
+    "flagd-ui",
+    "frontend",
+    "frontend-proxy",
+    "image-provider",
+    "load-generator",
+    "payment",
+    "product-catalog",
+    "quote",
+    "recommendation",
+    "shipping",
+    "telemetry-docs"
+  ],
+  "infrastructure": [
+    "astronomy-db",
+    "flagd",
+    "otel-collector",
+    "valkey-cart"
+  ],
+  "edges": [
+    { "source": "checkout", "target": "cart", "type": "grpc" },
+    { "source": "frontend", "target": "checkout", "type": "grpc" },
+    { "source": "recommendation", "target": "product-catalog", "type": "grpc" },
+    { "source": "frontend-proxy", "target": "frontend", "type": "http" },
+    { "source": "cart", "target": "valkey-cart", "type": "database" },
+    { "source": "product-catalog", "target": "astronomy-db", "type": "database" }
+  ]
+}

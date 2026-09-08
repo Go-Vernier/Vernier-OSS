@@ -1,0 +1,17 @@
+services:
+  payment:
+    build: ./payment
+  dispatch:
+    build: ./dispatch
+  checkout:
+    build: ./checkout
+  accounting:
+    build: ./accounting
+  notifications:
+    build: ./notifications
+  webhooks:
+    build: ./webhooks
+  rabbitmq:
+    image: rabbitmq:3-management
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0

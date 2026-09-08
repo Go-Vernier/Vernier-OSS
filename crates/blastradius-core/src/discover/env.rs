@@ -86,12 +86,17 @@ pub fn has_unresolved(value: &str) -> bool {
     UNRESOLVED.is_match(value)
 }
 
-/// `.env` beside the compose file wins over `.env.example`.
+/// `.env` beside the compose file wins over `.env.example`. A value may refer
+/// to an earlier line (`VALKEY_ADDR=valkey-cart:${VALKEY_PORT}`), as compose
+/// resolves it.
 pub fn load_compose_env(compose_dir: &Path) -> Env {
     let mut env = Env::new();
     for file in [".env.example", ".env"] {
         if let Some(text) = read_text(&compose_dir.join(file)) {
-            env.extend(parse_dotenv(&text));
+            for (key, value) in parse_dotenv(&text) {
+                let value = interpolate(&value, &env);
+                env.insert(key, value);
+            }
         }
     }
     env
@@ -152,5 +157,17 @@ mod tests {
         );
         assert_eq!(env.get("QUOTED").map(String::as_str), Some("quoted value"));
         assert_eq!(env.get("CART_DOCKERFILE"), None);
+    }
+
+    #[test]
+    fn dotenv_lines_may_reference_earlier_lines() {
+        let env: Env = [("VALKEY_PORT", "6379")]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        assert_eq!(
+            interpolate("valkey-cart:${VALKEY_PORT}", &env),
+            "valkey-cart:6379"
+        );
     }
 }

@@ -1,0 +1,18 @@
+{
+  "strategy": "docker-compose",
+  "code": [
+    "admin-server",
+    "api-gateway",
+    "config-server",
+    "customers-service",
+    "discovery-server",
+    "genai-service",
+    "grafana-server",
+    "prometheus-server",
+    "vets-service",
+    "visits-service"
+  ],
+  "infrastructure": [
+    "tracing-server"
+  ]
+}

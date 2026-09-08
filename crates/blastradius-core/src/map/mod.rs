@@ -7,6 +7,7 @@ pub mod config;
 pub mod facts;
 pub mod matchers;
 pub mod resolve;
+pub mod symbols;
 
 use std::collections::BTreeSet;
 use std::path::Path;
@@ -20,7 +21,8 @@ use crate::model::{Edge, EdgeType, Evidence, Service, ServiceRole};
 use config::ConfigIndex;
 use facts::{Extraction, Part};
 use matchers::FileContext;
-use resolve::{Resolver, Unresolved};
+use resolve::{Joins, Resolver, Unresolved};
+use symbols::Symbols;
 
 /// What a matcher found, before it is placed on a service.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -40,6 +42,42 @@ pub enum Target {
     },
     Template(Vec<Part>),
     ProtoService(String),
+    /// A message topic, queue, exchange or event type, with the part the
+    /// mentioning code plays.
+    Topic {
+        key: String,
+        role: TopicRole,
+    },
+    /// A message broker known through the client library a file imports;
+    /// `how` is the detail, e.g. `imports pika (rabbitmq client)`.
+    Broker {
+        family: String,
+        how: String,
+    },
+    /// A database key another service may share: `host/dbname`, or a named
+    /// resource such as `orderingdb`.
+    Database(String),
+    /// A package, module or artifact as imported or declared; `how` is the
+    /// detail, e.g. `import @acme/shared/utils`, `dependency @acme/shared`.
+    Package {
+        name: String,
+        how: String,
+    },
+    /// A repository-relative path another manifest refers to, already
+    /// normalised: `src/EventBus/EventBus.csproj`, `services/core-rs`.
+    PackagePath {
+        path: String,
+        how: String,
+    },
+}
+
+/// Which side of a topic a mention is on. `Unknown` is a declaration or a
+/// binding: `queue_declare("orders")`, `QueueBind(...)`, an SQS ARN.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TopicRole {
+    Producer,
+    Consumer,
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -103,11 +141,33 @@ pub fn run(root: &Path, index: &FileIndex, services: &[Service]) -> MapResult {
     }
     stats.parsers.sort_keys();
 
-    let owners_map = matchers::grpc::proto_owners(&extractions, &config, services);
-    let resolver = Resolver::new(services, &config, owners_map);
-    let outcomes = collect_outcomes(&extractions, &config, &resolver);
+    let symbols = symbols::build(&extractions);
+    let joins = Joins {
+        proto_owner: matchers::grpc::proto_owners(&extractions, &config, services),
+        topics: matchers::event::topic_index(&extractions, &config, &symbols),
+        databases: matchers::database::database_index(&extractions, &config, &symbols),
+    };
+    let resolver = Resolver::new(services, &config, joins);
+    let outcomes = collect_outcomes(&extractions, &config, &symbols, &resolver);
     let edges = merge_edges(outcomes, &mut stats);
     MapResult { edges, stats }
+}
+
+/// The code service whose root is the longest prefix of `path`. A root of
+/// `.` owns everything.
+pub fn owner_of_path<'a>(services: &'a [Service], path: &str) -> Option<&'a str> {
+    let mut owners: Vec<(&str, &str)> = services
+        .iter()
+        .filter(|s| s.role == ServiceRole::Code)
+        .filter_map(|s| s.root.as_deref().map(|r| (s.name.as_str(), r)))
+        .collect();
+    owners.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(b.0)));
+    owners
+        .iter()
+        .find(|(_, r)| {
+            *r == "." || path == *r || (path.starts_with(*r) && path[r.len()..].starts_with('/'))
+        })
+        .map(|(name, _)| *name)
 }
 
 /// Files worth reading, each with the service that owns it. Longest root
@@ -118,18 +178,7 @@ fn partition_files(
     services: &[Service],
     stats: &mut MappingStats,
 ) -> Vec<(String, String)> {
-    let mut owners: Vec<(&str, &str)> = services
-        .iter()
-        .filter(|s| s.role == ServiceRole::Code)
-        .filter_map(|s| s.root.as_deref().map(|r| (s.name.as_str(), r)))
-        .collect();
-    owners.sort_by(|a, b| b.1.len().cmp(&a.1.len()).then_with(|| a.0.cmp(b.0)));
-    let owner_of = |file: &str| -> Option<&str> {
-        owners
-            .iter()
-            .find(|(_, r)| *r == "." || file.starts_with(*r) && file[r.len()..].starts_with('/'))
-            .map(|(name, _)| *name)
-    };
+    let owner_of = |file: &str| owner_of_path(services, file);
 
     let mut to_scan: Vec<(String, String)> = Vec::new();
     for file in index.files() {
@@ -170,6 +219,7 @@ fn extract_all(root: &Path, to_scan: &[(String, String)]) -> Vec<(String, String
 fn collect_outcomes(
     extractions: &[(String, String, Extraction)],
     config: &ConfigIndex,
+    symbols: &Symbols,
     resolver: &Resolver<'_>,
 ) -> Vec<Result<Edge, Unresolved>> {
     let matchers = matchers::all();
@@ -181,21 +231,24 @@ fn collect_outcomes(
                 file,
                 facts: &ex.facts,
                 config,
+                symbols,
             };
             let mut results = Vec::new();
             for matcher in &matchers {
                 for candidate in matcher.candidates(&ctx) {
-                    results.push(resolver.resolve(service, &candidate).map(|resolved| Edge {
-                        source: service.clone(),
-                        target: resolved.target,
-                        edge_type: resolved.edge_type,
-                        confidence: resolved.confidence,
-                        evidence: vec![Evidence {
-                            file: candidate.evidence.file.clone(),
-                            line: candidate.evidence.line,
-                            detail: Some(resolved.detail),
-                        }],
-                    }));
+                    for outcome in resolver.resolve_all(service, &candidate) {
+                        results.push(outcome.map(|resolved| Edge {
+                            source: resolved.source.clone().unwrap_or_else(|| service.clone()),
+                            target: resolved.target,
+                            edge_type: resolved.edge_type,
+                            confidence: resolved.confidence,
+                            evidence: vec![Evidence {
+                                file: candidate.evidence.file.clone(),
+                                line: candidate.evidence.line,
+                                detail: Some(resolved.detail),
+                            }],
+                        }));
+                    }
                 }
             }
             results

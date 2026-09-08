@@ -49,8 +49,8 @@ const GO: Table = Table {
     templates: &[],
     template_vars: &[],
     template_skip: &[],
-    calls: &["call_expression"],
-    args: &["argument_list"],
+    calls: &["call_expression", "composite_literal"],
+    args: &["argument_list", "literal_value"],
     imports: &["import_spec"],
     annotations: &[],
     extends: &[],
@@ -177,6 +177,8 @@ impl Walker<'_> {
             self.on_annotation(node);
         } else if t.extends.contains(&kind) {
             self.on_extends(node);
+        } else if self.language == Language::CSharp && kind == "element_access_expression" {
+            self.on_cs_configuration(node);
         } else if self.language == Language::JavaScript
             || self.language == Language::TypeScript
             || self.language == Language::Tsx
@@ -270,17 +272,30 @@ impl Walker<'_> {
         let mut out = Vec::new();
         let mut cursor = args.walk();
         for child in args.named_children(&mut cursor) {
-            let kind = child.kind();
-            let unwrapped =
-                if kind == "argument" || kind == "keyword_argument" || kind == "named_argument" {
-                    let mut inner = child.walk();
-                    child.named_children(&mut inner).last().unwrap_or(child)
-                } else {
-                    child
-                };
-            out.push(self.arg_of(unwrapped));
+            out.push(self.arg_of(Self::unwrap_argument(child)));
         }
         out
+    }
+
+    /// `argument`, `keyword_argument`, `named_argument` and Go's
+    /// `keyed_element` wrap the value they pass; `literal_element` wraps once
+    /// more. The value is the last named child at each level.
+    fn unwrap_argument(node: Node<'_>) -> Node<'_> {
+        let mut node = node;
+        for _ in 0..3 {
+            match node.kind() {
+                "argument" | "keyword_argument" | "named_argument" | "keyed_element"
+                | "literal_element" => {
+                    let mut cursor = node.walk();
+                    match node.named_children(&mut cursor).last() {
+                        Some(inner) => node = inner,
+                        None => return node,
+                    }
+                }
+                _ => return node,
+            }
+        }
+        node
     }
 
     fn arg_of(&self, node: Node<'_>) -> Arg {
@@ -491,7 +506,11 @@ impl Walker<'_> {
                 .arguments_node(inner)
                 .map(|a| self.args_of(a))
                 .unwrap_or_default(),
-            Some(inner) => self.string_args_within(inner),
+            Some(inner) => {
+                let mut args = self.string_args_within(inner);
+                args.extend(self.symbol_args_within(inner));
+                args
+            }
             None => Vec::new(),
         };
         if !name.is_empty() {
@@ -514,6 +533,37 @@ impl Walker<'_> {
             let children: Vec<Node<'_>> = n.named_children(&mut cursor).collect();
             for child in children.into_iter().rev() {
                 stack.push(child);
+            }
+        }
+        out
+    }
+
+    /// Annotation values that are identifiers or member paths, not strings:
+    /// `queues = Queues.queueName`, `[Trigger(Queues.Name)]`. Kept as Other
+    /// so a matcher can look the symbol up.
+    fn symbol_args_within(&self, node: Node<'_>) -> Vec<Arg> {
+        let mut out = Vec::new();
+        let mut cursor = node.walk();
+        for child in node.named_children(&mut cursor) {
+            let value = match child.kind() {
+                "element_value_pair" | "attribute_argument" => {
+                    let mut inner = child.walk();
+                    child.named_children(&mut inner).last()
+                }
+                _ => None,
+            };
+            let Some(value) = value else { continue };
+            let text = self.text(value).trim();
+            let is_symbol = !text.is_empty()
+                && text
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '$'))
+                && text
+                    .chars()
+                    .next()
+                    .is_some_and(|c| c.is_ascii_alphabetic() || c == '_');
+            if is_symbol {
+                out.push(Arg::Other(text.to_string()));
             }
         }
         out
@@ -568,6 +618,31 @@ impl Walker<'_> {
                 None => return,
             }
         } else {
+            return;
+        };
+        if !super::is_var_name(&name) {
+            return;
+        }
+        let default = self.default_after(node);
+        self.facts.push(Fact::EnvRef {
+            name,
+            default,
+            line: Self::line(node),
+        });
+    }
+
+    /// `Configuration["KEY"]`, `builder.Configuration["KEY"]`: .NET reads
+    /// environment variables through configuration.
+    fn on_cs_configuration(&mut self, node: Node<'_>) {
+        let text = self.text(node);
+        let Some((receiver, index)) = text.split_once('[') else {
+            return;
+        };
+        let receiver = receiver.trim().to_lowercase();
+        if !(receiver.ends_with("configuration") || receiver.ends_with("config")) {
+            return;
+        }
+        let Some(name) = unquote(index.trim_end_matches(']')) else {
             return;
         };
         if !super::is_var_name(&name) {

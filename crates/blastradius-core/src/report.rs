@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::analyze::Analysis;
 use crate::map::facts::Parser;
-use crate::model::{Confidence, Edge, Service, ServiceRole};
+use crate::model::{Confidence, Edge, EdgeType, Service, ServiceRole};
 
 struct Paint {
     color: bool,
@@ -191,7 +191,7 @@ fn structure(analysis: &Analysis, services: &[Service], c: &Paint, out: &mut Vec
     if edges.is_empty() {
         out.push(format!(
             "  {}",
-            c.dim("No static edges found: no HTTP or gRPC call to another discovered service was recognised.")
+            c.dim("No static edges found: no HTTP, gRPC, event, database or import edge to another discovered service was recognised.")
         ));
         return;
     }
@@ -352,6 +352,55 @@ fn findings(edges: &[Edge], services: &[Service], c: &Paint, out: &mut Vec<Strin
             "    {}",
             c.dim(&format!("touched by {} {noun}", sources.len()))
         ));
+    }
+    out.push(String::new());
+    // One line per pair of code services that read the same database, under
+    // the key their strongest evidence names.
+    let code_names: BTreeSet<&str> = services
+        .iter()
+        .filter(|s| s.role == ServiceRole::Code)
+        .map(|s| s.name.as_str())
+        .collect();
+    let mut shared: BTreeMap<String, BTreeSet<&str>> = BTreeMap::new();
+    let mut seen_pairs: BTreeSet<(&str, &str)> = BTreeSet::new();
+    for e in edges.iter().filter(|e| {
+        e.edge_type == EdgeType::Database
+            && code_names.contains(e.source.as_str())
+            && code_names.contains(e.target.as_str())
+    }) {
+        let pair = if e.source <= e.target {
+            (e.source.as_str(), e.target.as_str())
+        } else {
+            (e.target.as_str(), e.source.as_str())
+        };
+        if !seen_pairs.insert(pair) {
+            continue;
+        }
+        let keys: Vec<String> = e
+            .evidence
+            .iter()
+            .filter_map(|v| {
+                v.detail
+                    .as_deref()?
+                    .strip_prefix("shared database ")?
+                    .split(" with ")
+                    .next()
+                    .map(str::to_string)
+            })
+            .collect();
+        let key = keys
+            .iter()
+            .find(|k| !k.contains('/'))
+            .or_else(|| keys.first())
+            .cloned();
+        if let Some(key) = key {
+            shared.entry(key).or_default().extend([pair.0, pair.1]);
+        }
+    }
+    out.push(format!("  {:<38} {}", "Shared databases", shared.len()));
+    for (key, names) in &shared {
+        let list = names.iter().copied().collect::<Vec<_>>().join(", ");
+        out.push(format!("    {key:<36} {}", c.dim(&list)));
     }
 }
 

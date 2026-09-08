@@ -27,14 +27,14 @@ boundaries in about 100 ms each, without configuration:
 ## Status
 
 Phase 0, week 2. This is the open-source CLI described in
-[docs/build-spec.md](docs/build-spec.md). Service discovery and the first
-static edges are built. The rest is not, and the report says so instead of
-guessing.
+[docs/build-spec.md](docs/build-spec.md). Service discovery and static
+dependency mapping are built. The rest is not, and the report says so instead
+of guessing.
 
 | Stage | What it does | State |
 | --- | --- | --- |
 | 1. Discover | Find service boundaries: docker-compose, Kubernetes, monorepo layout, workspace config | Built |
-| 2. Map | Static edges: HTTP calls, gRPC stubs, and the datastore and broker hosts found on the way; message topics, shared databases and cross-package imports next | HTTP and gRPC built |
+| 2. Map | Static edges: HTTP calls, gRPC stubs, message topics and typed events, shared databases, cross-package imports; datastore and broker hosts found on the way | Built |
 | 3. Join | Optional runtime edges from OpenTelemetry or Datadog, with an explicit name-matching report | Planned |
 | 4. Report | Blast radius of a change, one PR, or the last N PRs; terminal and self-contained HTML | Planned |
 
@@ -82,11 +82,11 @@ SERVICES
 
 STRUCTURE
 
-  Total edges              19
-  Static                   11
-  Inferred                 0
-  Uncertain                8
-  By type                  http 11 · database 6 · event 2
+  Total edges              20
+  Static                   12
+  Inferred                 2
+  Uncertain                6
+  By type                  http 11 · database 6 · event 3
 
   Scanned 75 files in 11 services (tree-sitter: go, java, javascript, php, python · regex: conf, css, dockerfile, html, ini, json, properties, sh, sql, template, xml, yaml)
   69 files outside every service were not read
@@ -98,26 +98,31 @@ EDGES
   cart       ->  catalogue  http      static      cart/server.js:30  CATALOGUE_HOST default catalogue
   cart       ->  redis      database  static      cart/server.js:29  REDIS_HOST default redis
   catalogue  ->  mongodb    database  static      catalogue/server.js:157  MONGO_URL default mongodb://mongodb:27017/catalogue
-  dispatch   ->  rabbitmq   event     uncertain   dispatch/main.go:141  "rabbitmq"
+  dispatch   ->  rabbitmq   event     inferred    dispatch/main.go:16  imports github.com/streadway/amqp (rabbitmq client)
   payment    ->  cart       http      static      payment/payment.py:24  CART_HOST default cart
+  payment    ->  dispatch   event     inferred    dispatch/main.go:72  mentions "robot-shop", published by payment
   payment    ->  rabbitmq   event     static      payment/rabbitmq.py:6  AMQP_HOST default rabbitmq
   payment    ->  user       http      static      payment/payment.py:25  USER_HOST default user
   ratings    ->  catalogue  http      static      ratings/html/src/Kernel.php:76  http://catalogue:8080
+  ratings    ->  mysql      database  static      ratings/html/src/Kernel.php:77  mysql://mysql
   ...
 
 FINDINGS
 
-  Never called by another service        3 services
-    dispatch, load, web                  (dead, or just quiet?)
+  Never called by another service        2 services
+    load, web                            (dead, or just quiet?)
 
   Most connected                         cart
     touched by 3 services
+
+  Shared databases                       0
 ```
 
 Every service row points at the file and line that declared it. Every edge
 row points at the file and line where the call was found, and says how sure
-the tool is: the nginx template resolved `${CATALOGUE_HOST}` by name only, so
-that edge is Uncertain; the cart service's `REDIS_HOST` default is a
+the tool is: `dispatch`'s edge to `rabbitmq` comes from an import of the AMQP
+client library joined to the broker image declared in compose, so it is
+Inferred rather than Static; the cart service's `REDIS_HOST` default is a
 literal, so that one is Static.
 
 ## How discovery works
@@ -156,11 +161,21 @@ produce the same language-neutral facts: string literals, interpolated
 templates, calls with their string arguments, imports, annotations, base
 types and environment lookups with their literal defaults.
 
-Two matchers read those facts. The HTTP matcher takes URLs, `host:port`
-literals, templates around them, Feign clients, and environment variables
-whose name says they hold a host. The gRPC matcher takes generated client
-stubs and works out which service owns each proto service from its server
-registration, or from its name when nothing registers it.
+Five matchers read those facts. The HTTP matcher takes URLs, `host:port`
+literals, templates around them, Feign clients, environment variables whose
+name says they hold a host, and configuration settings whose key does
+(`spring.data.mongodb.host: ts-order-mongo`). The gRPC matcher takes
+generated client stubs and works out which service owns each proto service
+from its server registration, or from its name when nothing registers it.
+The event matcher takes publish, send, produce, subscribe, consume and
+declare calls by library, listener annotations, typed event buses
+(`new OrderStartedIntegrationEvent(...)`, `AddSubscription<X, H>`) and Go
+struct literals; a topic written as a constant (`self.EXCHANGE`,
+`Queues.queueName`) is read back from the literal the service assigns to it.
+The database matcher keys every connection string, URL, rendered template
+and host-plus-database setting by host and database name. The import
+matcher reads imports in code and dependencies, Maven sibling artifacts,
+Cargo path dependencies and `.csproj` project references in manifests.
 
 A resolver places each candidate on a discovered service and says how:
 
@@ -174,12 +189,20 @@ A resolver places each candidate on a discovered service and says how:
 | `http://${CART_HOST}:8080/` in a template | the variable inside it | Uncertain |
 | `"rabbitmq"` as a plain string | the name of a datastore or broker | Uncertain |
 | `pb.NewCartServiceClient(conn)` | the service that registers `CartService` | Static |
+| `spring.data.mongodb.host: ts-order-mongo` in a service's config | the setting's value | Static |
+| `basic_publish(routing_key='orders')` and `Consume("orders")` in two services | the topic, producer → consumer | Inferred |
+| `import pika` with a `rabbitmq` image declared | the client library's broker family | Inferred |
+| `jdbc:mysql://mysql/shop` in two services | the shared `host/database` key, both directions | Inferred |
+| `import '@acme/shared/utils'` with `packages/shared` declaring `@acme/shared` | the package name, or a prefix ending at a separator | Static |
+| `<ProjectReference Include="..\EventBus\EventBus.csproj" />` | the service whose root holds the path | Static |
 
 An edge's type follows its target: a variable pointing at Redis is a
 `database` edge, one pointing at RabbitMQ is an `event` edge, and an HTTP
 URL on a pair that also has a gRPC stub folds into the gRPC edge. Anything
 that matches no discovered service is counted and listed under `mapping` in
-the JSON and in the report, never guessed.
+the JSON and in the report, never guessed; a topic with a producer but no
+consumer in the repository is listed as `topic:<name>`. An import that
+matches no discovered package is an external library and is not counted.
 
 ## The confidence model
 

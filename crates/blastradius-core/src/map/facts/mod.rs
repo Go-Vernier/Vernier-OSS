@@ -63,6 +63,15 @@ pub enum Fact {
         default: Option<String>,
         line: u32,
     },
+    /// A name bound to a literal value. Configuration files: `host: mongodb`,
+    /// `spring.data.mongodb.host=mongodb`, `<artifactId>ts-common</artifactId>`,
+    /// `ENV REDIS_HOST redis`. Code: `EXCHANGE = 'robot-shop'`,
+    /// `public final static String queueName = "email";`. Quotes are removed.
+    Setting {
+        key: String,
+        value: String,
+        line: u32,
+    },
 }
 
 impl Fact {
@@ -74,7 +83,8 @@ impl Fact {
             | Self::Import { line, .. }
             | Self::Annotation { line, .. }
             | Self::Extends { line, .. }
-            | Self::EnvRef { line, .. } => *line,
+            | Self::EnvRef { line, .. }
+            | Self::Setting { line, .. } => *line,
         }
     }
 }
@@ -246,7 +256,8 @@ fn label_for(language: Language) -> &'static str {
 pub fn extract(path: &str, text: &str) -> Option<Extraction> {
     let language = language_for(path)?;
     if language != Language::Other {
-        if let Some(facts) = treesitter::extract(language, text) {
+        if let Some(mut facts) = treesitter::extract(language, text) {
+            facts.extend(regex::assignments(text));
             return Some(Extraction {
                 facts,
                 parser: Parser::TreeSitter,
@@ -403,6 +414,164 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+    fn settings(facts: &[Fact]) -> Vec<(&str, &str)> {
+        facts
+            .iter()
+            .filter_map(|f| match f {
+                Fact::Setting { key, value, .. } => Some((key.as_str(), value.as_str())),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn settings_from_config_files() {
+        let yml = extract(
+            "a/src/main/resources/application.yml",
+            "spring:\n  data:\n    mongodb:\n      host: ts-order-mongo\n      database: ts-order\n  kafka:\n    bootstrap-servers: kafka:9092\n# host: commented-out\nurl: \"jdbc:mysql://mysql:3306/x\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            settings(&yml.facts),
+            vec![
+                ("host", "ts-order-mongo"),
+                ("database", "ts-order"),
+                ("bootstrap-servers", "kafka:9092"),
+                ("url", "jdbc:mysql://mysql:3306/x"),
+            ]
+        );
+        let props = extract(
+            "a/application.properties",
+            "spring.data.mongodb.host=ts-order-mongo\n",
+        )
+        .unwrap();
+        assert_eq!(
+            settings(&props.facts),
+            vec![("spring.data.mongodb.host", "ts-order-mongo")]
+        );
+        let xml = extract(
+            "a/pom.xml",
+            "<project>\n  <artifactId>ts-order-service</artifactId>\n  <dependency>\n    <groupId>ts</groupId>\n    <artifactId>ts-common</artifactId>\n  </dependency>\n  <ProjectReference Include=\"..\\X\\X.csproj\" />\n</project>\n",
+        )
+        .unwrap();
+        assert_eq!(
+            settings(&xml.facts),
+            vec![
+                ("artifactId", "ts-order-service"),
+                ("groupId", "ts"),
+                ("artifactId", "ts-common")
+            ]
+        );
+        let docker = extract(
+            "a/Dockerfile",
+            "FROM x\nENV CATALOGUE_HOST catalogue\nENV REDIS_HOST=redis\nARG TAG=\"1.0\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            settings(&docker.facts),
+            vec![
+                ("CATALOGUE_HOST", "catalogue"),
+                ("REDIS_HOST", "redis"),
+                ("TAG", "1.0")
+            ]
+        );
+    }
+
+    #[test]
+    fn assignments_bind_names_to_literals_in_every_language() {
+        let py = extract("a/rabbitmq.py", "class Publisher:\n    EXCHANGE='robot-shop'\n    ROUTING_KEY = 'orders'\n    def go(self):\n        self.topic = os.getenv('KAFKA_TOPIC', 'orders')\n        if a == 'x':\n            pass\n        y = foo('a').bar()\n").unwrap();
+        assert_eq!(
+            settings(&py.facts),
+            vec![
+                ("EXCHANGE", "robot-shop"),
+                ("ROUTING_KEY", "orders"),
+                ("topic", "orders")
+            ]
+        );
+        let java = extract(
+            "a/Queues.java",
+            "public class Queues {\n    public final static String queueName = \"email\";\n}\n",
+        )
+        .unwrap();
+        assert_eq!(settings(&java.facts), vec![("queueName", "email")]);
+        let cs = extract("a/Bus.cs", "class Bus {\n    private const string ExchangeName = \"eshop_event_bus\";\n    private static readonly string TopicName = Environment.GetEnvironmentVariable(\"KAFKA_TOPIC\") ?? \"orders\";\n}\n").unwrap();
+        assert_eq!(
+            settings(&cs.facts),
+            vec![("ExchangeName", "eshop_event_bus"), ("TopicName", "orders")]
+        );
+        let go = extract(
+            "a/p.go",
+            "package p\nconst KafkaTopic = \"orders\"\nvar Topic = getTopic()\n",
+        )
+        .unwrap();
+        assert_eq!(settings(&go.facts), vec![("KafkaTopic", "orders")]);
+        let js = extract("a/p.js", "const topic = 'orders';\nlet n = 3;\nx => 'y';\n").unwrap();
+        assert_eq!(settings(&js.facts), vec![("topic", "orders")]);
+        let kt = extract("a/main.kt", "val topic: String = System.getenv(\"KAFKA_TOPIC\") ?: \"orders\"\nconst val groupID = \"fraud-detection\"\n").unwrap();
+        assert_eq!(kt.parser, Parser::Regex);
+        assert_eq!(
+            settings(&kt.facts),
+            vec![("topic", "orders"), ("groupID", "fraud-detection")]
+        );
+        let php = extract("a/p.php", "<?php\n$topic = 'orders';\n").unwrap();
+        assert_eq!(settings(&php.facts), vec![("topic", "orders")]);
+    }
+
+    #[test]
+    fn go_composite_literals_are_calls() {
+        let go = extract("a/main.go", "package main\nfunc f() {\n\tmsg := &sarama.ProducerMessage{Topic: \"orders\", Value: sarama.StringEncoder(\"x\")}\n\tcg.Consume(ctx, []string{\"orders\"}, h)\n}\n").unwrap();
+        let Fact::Call { args, .. } = go
+            .facts
+            .iter()
+            .find(|f| matches!(f, Fact::Call { callee, .. } if callee == "sarama.ProducerMessage"))
+            .unwrap_or_else(|| panic!("{:?}", go.facts))
+        else {
+            unreachable!()
+        };
+        assert_eq!(args[0], Arg::Str("orders".into()));
+        assert!(calls(&go.facts).contains(&"cg.Consume"));
+    }
+
+    #[test]
+    fn annotation_values_that_are_symbols_become_other_args() {
+        let java = extract("a/R.java", "class R {\n  @RabbitListener(queues = Queues.queueName)\n  void a() {}\n  @KafkaListener(topics = \"orders\", groupId = \"g\")\n  void b() {}\n}\n").unwrap();
+        let args_of = |name: &str| -> Vec<Arg> {
+            java.facts
+                .iter()
+                .find_map(|f| match f {
+                    Fact::Annotation { name: n, args, .. } if n == name => Some(args.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("{:?}", java.facts))
+        };
+        assert_eq!(
+            args_of("RabbitListener"),
+            vec![Arg::Other("Queues.queueName".into())]
+        );
+        assert_eq!(
+            args_of("KafkaListener"),
+            vec![Arg::Str("orders".into()), Arg::Str("g".into())]
+        );
+        let cs = extract(
+            "a/F.cs",
+            "class F {\n  [ServiceBusTrigger(Queues.Name)]\n  void a() {}\n}\n",
+        )
+        .unwrap();
+        assert!(
+            cs.facts.iter().any(|f| matches!(f, Fact::Annotation { name, args, .. } if name == "ServiceBusTrigger" && args == &[Arg::Other("Queues.Name".into())])),
+            "{:?}",
+            cs.facts
+        );
+    }
+
+    #[test]
+    fn csharp_configuration_index_is_an_env_ref() {
+        let cs = extract("a/Program.cs", "string valkeyAddress = builder.Configuration[\"VALKEY_ADDR\"];\nvar x = Configuration[\"REDIS_ADDR\"] ?? \"redis:6379\";\nvar y = dict[\"k\"];\n").unwrap();
+        assert_eq!(
+            envs(&cs.facts),
+            vec![("VALKEY_ADDR", None), ("REDIS_ADDR", Some("redis:6379"))]
+        );
     }
 
     #[test]

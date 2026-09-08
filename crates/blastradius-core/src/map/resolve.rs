@@ -2,14 +2,14 @@
 //! how the match was made. Recall over precision: anything that matches a
 //! discovered service is kept; anything that matches nothing is reported as
 //! unresolved, never guessed.
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::LazyLock;
 
 use regex::Regex;
 
 use super::config::ConfigIndex;
 use super::facts::{Part, env_default};
-use super::{Candidate, Target};
+use super::{Candidate, Target, TopicRole};
 use crate::discover::directories::{image_basename, normalise};
 use crate::model::{Confidence, EdgeType, Service};
 
@@ -19,6 +19,9 @@ pub struct Resolved {
     pub edge_type: EdgeType,
     pub confidence: Confidence,
     pub detail: String,
+    /// When the edge starts somewhere other than the file's own service: a
+    /// consumer's mention yields producer → consumer.
+    pub source: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -86,7 +89,7 @@ const BROKERS: &[&str] = &[
 const EVENT_SCHEMES: &[&str] = &[
     "amqp", "amqps", "kafka", "nats", "mqtt", "mqtts", "stomp", "sqs", "pulsar",
 ];
-const DATABASE_SCHEMES: &[&str] = &[
+pub(crate) const DATABASE_SCHEMES: &[&str] = &[
     "mongodb",
     "mongodb+srv",
     "postgres",
@@ -118,6 +121,12 @@ static HOSTNAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^[A-Za-z0-9][A-Za-z0-9.-]*$").unwrap());
 
 const HOSTISH_SUFFIXES: &[&str] = &[
+    "_CONNECTION_STRING",
+    "_CONNECTIONSTRING",
+    "_BOOTSTRAP_SERVERS",
+    "_CONNECTION",
+    "_BROKERS",
+    "_DSN",
     "_SERVICE_HOST",
     "_SERVICE_ADDR",
     "_SERVICE_URL",
@@ -165,6 +174,58 @@ pub fn is_hostish_var(name: &str) -> bool {
     HOSTISH_SUFFIXES.iter().any(|s| upper.ends_with(s))
 }
 
+/// Keys of settings that hold a host: the last dotted segment is a hostish
+/// word, or the whole key is a hostish variable name.
+const HOSTISH_KEYS: &[&str] = &[
+    "host",
+    "hostname",
+    "hosts",
+    "url",
+    "uri",
+    "addr",
+    "address",
+    "endpoint",
+    "server",
+    "servers",
+    "brokers",
+    "bootstrap-servers",
+    "bootstrap_servers",
+    "bootstrapservers",
+    "nodes",
+    "seeds",
+    "contact-points",
+    "contactpoints",
+    "connection-string",
+    "connectionstring",
+    "connection_string",
+    "dsn",
+];
+
+pub fn is_hostish_key(key: &str) -> bool {
+    let key = key.trim();
+    let last = key.rsplit('.').next().unwrap_or(key);
+    let last = last.split('[').next().unwrap_or(last).to_lowercase();
+    HOSTISH_KEYS.contains(&last.as_str()) || is_hostish_var(key)
+}
+
+static ADO_HOST: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:^|;)\s*(?:server|host|data source|addr|address)\s*=\s*([^;,:\s]+)").unwrap()
+});
+static ADO_DATABASE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)(?:^|;)\s*(?:database|initial catalog)\s*=\s*([^;\s]+)").unwrap()
+});
+
+/// ADO.NET style `Host=x;Database=y;...`: (host, database), lowercased, the
+/// port after `,` or `:` removed. None unless both parts are present.
+pub fn ado_connection(text: &str) -> Option<(String, String)> {
+    let host = ADO_HOST.captures(text)?[1].trim().to_lowercase();
+    let database = ADO_DATABASE.captures(text)?[1].trim().to_lowercase();
+    if host.is_empty() || database.is_empty() || text.contains("://") {
+        return None;
+    }
+    Some((host, database))
+}
+
 /// `PRODUCT_CATALOG_SERVICE_ADDR` -> `productcatalog`, `CATALOGUE_HOST` ->
 /// `catalogue`: strip hostish suffixes, then the service-name normalisation.
 pub fn normalise_var(name: &str) -> String {
@@ -186,7 +247,7 @@ pub fn normalise_var(name: &str) -> String {
     normalise(&upper)
 }
 
-fn is_local(host: &str) -> bool {
+pub(crate) fn is_local(host: &str) -> bool {
     host == "localhost"
         || host == "0.0.0.0"
         || host == "::1"
@@ -211,7 +272,25 @@ fn finish(
         edge_type: hint.unwrap_or(edge_type),
         confidence,
         detail,
+        source: None,
     })
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TopicSides {
+    pub producers: BTreeSet<String>,
+    pub consumers: BTreeSet<String>,
+    pub unknown: BTreeSet<String>,
+}
+
+/// What the pre-pass over every file's facts learned about the repository as
+/// a whole: who registers which proto service, who produces and consumes
+/// which topic, who uses which database key.
+#[derive(Debug, Default)]
+pub struct Joins {
+    pub proto_owner: HashMap<String, String>,
+    pub topics: HashMap<String, TopicSides>,
+    pub databases: HashMap<String, BTreeSet<String>>,
 }
 
 pub struct Resolver<'a> {
@@ -220,16 +299,12 @@ pub struct Resolver<'a> {
     by_name: HashMap<String, usize>,
     by_lower: HashMap<String, usize>,
     by_normalised: HashMap<String, usize>,
-    proto_owner: HashMap<String, String>,
+    joins: Joins,
     proto_owners: HashSet<String>,
 }
 
 impl<'a> Resolver<'a> {
-    pub fn new(
-        services: &'a [Service],
-        config: &'a ConfigIndex,
-        proto_owner: HashMap<String, String>,
-    ) -> Self {
+    pub fn new(services: &'a [Service], config: &'a ConfigIndex, joins: Joins) -> Self {
         let mut by_name = HashMap::new();
         let mut by_lower = HashMap::new();
         let mut by_normalised = HashMap::new();
@@ -247,14 +322,14 @@ impl<'a> Resolver<'a> {
                 }
             }
         }
-        let proto_owners = proto_owner.values().cloned().collect();
+        let proto_owners = joins.proto_owner.values().cloned().collect();
         Self {
             services,
             config,
             by_name,
             by_lower,
             by_normalised,
-            proto_owner,
+            joins,
             proto_owners,
         }
     }
@@ -374,14 +449,24 @@ impl<'a> Resolver<'a> {
                     .service_for_host(&host)
                     .ok_or_else(|| Unresolved::Unknown(host.clone()))?;
                 let ty = self.classify(target, None, true);
-                finish(source, target, ty, Confidence::Static, text.clone(), hint)
+                let detail = candidate
+                    .evidence
+                    .detail
+                    .clone()
+                    .unwrap_or_else(|| text.clone());
+                finish(source, target, ty, Confidence::Static, detail, hint)
             }
             Target::Host(host) => {
                 let target = self
                     .service_for_host(host)
                     .ok_or_else(|| Unresolved::Unknown(host.clone()))?;
                 let ty = self.classify(target, None, false);
-                finish(source, target, ty, Confidence::Static, host.clone(), hint)
+                let detail = candidate
+                    .evidence
+                    .detail
+                    .clone()
+                    .unwrap_or_else(|| host.clone());
+                finish(source, target, ty, Confidence::Static, detail, hint)
             }
             Target::BareName(host) => {
                 let target = self
@@ -407,6 +492,7 @@ impl<'a> Resolver<'a> {
             Target::Template(parts) => self.resolve_template(source, parts, hint),
             Target::ProtoService(name) => {
                 let owner = self
+                    .joins
                     .proto_owner
                     .get(name)
                     .ok_or_else(|| Unresolved::Unknown(name.clone()))?;
@@ -419,7 +505,227 @@ impl<'a> Resolver<'a> {
                     hint,
                 )
             }
+            Target::Topic { .. } | Target::Broker { .. } | Target::Database(_) => self
+                .resolve_all(source, candidate)
+                .into_iter()
+                .next()
+                .unwrap_or(Err(Unresolved::Ignored)),
+            Target::Package { name, how } => self.resolve_package(source, name, how, hint),
+            Target::PackagePath { path, how } => {
+                let owner = self.service_for_path(path).ok_or(Unresolved::Ignored)?;
+                finish(
+                    source,
+                    owner,
+                    EdgeType::Import,
+                    Confidence::Static,
+                    how.clone(),
+                    hint,
+                )
+            }
         }
+    }
+
+    /// Every edge a candidate yields. Hosts, variables and packages give at
+    /// most one; topics, brokers and shared databases fan out to every
+    /// counterpart.
+    pub fn resolve_all(
+        &self,
+        source: &str,
+        candidate: &Candidate,
+    ) -> Vec<Result<Resolved, Unresolved>> {
+        match &candidate.target {
+            Target::Topic { key, role } => self.resolve_topic(source, key, *role),
+            Target::Broker { family, how } => self.resolve_broker(source, family, how),
+            Target::Database(key) => self.resolve_database(source, key),
+            _ => vec![self.resolve(source, candidate)],
+        }
+    }
+
+    fn resolve_topic(
+        &self,
+        source: &str,
+        key: &str,
+        role: TopicRole,
+    ) -> Vec<Result<Resolved, Unresolved>> {
+        let Some(sides) = self.joins.topics.get(key) else {
+            return vec![Err(Unresolved::Ignored)];
+        };
+        let inferred = |target: &str, from: Option<&str>, detail: String| Resolved {
+            target: target.to_string(),
+            edge_type: EdgeType::Event,
+            confidence: Confidence::Inferred,
+            detail,
+            source: from.map(str::to_string),
+        };
+        let mut out = Vec::new();
+        let others = |set: &BTreeSet<String>| -> Vec<String> {
+            set.iter()
+                .filter(|s| s.as_str() != source)
+                .cloned()
+                .collect()
+        };
+        match role {
+            TopicRole::Producer => {
+                for c in others(&sides.consumers) {
+                    out.push(Ok(inferred(
+                        &c,
+                        None,
+                        format!("publishes \"{key}\", consumed by {c}"),
+                    )));
+                }
+                for u in others(&sides.unknown) {
+                    out.push(Ok(inferred(
+                        &u,
+                        None,
+                        format!("publishes \"{key}\", mentioned by {u}"),
+                    )));
+                }
+            }
+            TopicRole::Consumer => {
+                for p in others(&sides.producers) {
+                    out.push(Ok(inferred(
+                        source,
+                        Some(&p),
+                        format!("consumes \"{key}\", published by {p}"),
+                    )));
+                }
+                for u in others(&sides.unknown) {
+                    out.push(Ok(inferred(
+                        source,
+                        Some(&u),
+                        format!("consumes \"{key}\", mentioned by {u}"),
+                    )));
+                }
+            }
+            TopicRole::Unknown => {
+                for p in others(&sides.producers) {
+                    out.push(Ok(inferred(
+                        source,
+                        Some(&p),
+                        format!("mentions \"{key}\", published by {p}"),
+                    )));
+                }
+                for c in others(&sides.consumers) {
+                    out.push(Ok(inferred(
+                        &c,
+                        None,
+                        format!("mentions \"{key}\", consumed by {c}"),
+                    )));
+                }
+            }
+        }
+        if out.is_empty() {
+            return vec![if role == TopicRole::Unknown {
+                Err(Unresolved::Ignored)
+            } else {
+                Err(Unresolved::Unknown(format!("topic:{key}")))
+            }];
+        }
+        out
+    }
+
+    /// Discovered services whose name or image names the broker family.
+    fn resolve_broker(
+        &self,
+        source: &str,
+        family: &str,
+        how: &str,
+    ) -> Vec<Result<Resolved, Unresolved>> {
+        let aliases: Vec<&str> = match family {
+            "rabbitmq" => vec!["rabbitmq", "amqp"],
+            "kafka" => vec!["kafka", "redpanda"],
+            "mqtt" => vec!["mqtt", "mosquitto", "emqx", "hivemq"],
+            "sqs" | "sns" => vec![family, "localstack"],
+            "activemq" => vec!["activemq", "artemis"],
+            other => vec![other],
+        };
+        let mut out = Vec::new();
+        for s in self.services {
+            let mut haystack = s.name.to_lowercase();
+            if let Some(image) = image_basename(s.image.as_deref()) {
+                haystack.push(' ');
+                haystack.push_str(&image.to_lowercase());
+            }
+            if aliases.iter().any(|a| haystack.contains(a)) {
+                out.push(finish(
+                    source,
+                    &s.name,
+                    EdgeType::Event,
+                    Confidence::Inferred,
+                    how.to_string(),
+                    None,
+                ));
+            }
+        }
+        if out.is_empty() {
+            return vec![Err(Unresolved::Ignored)];
+        }
+        out
+    }
+
+    fn resolve_database(&self, source: &str, key: &str) -> Vec<Result<Resolved, Unresolved>> {
+        let out: Vec<Result<Resolved, Unresolved>> = self
+            .joins
+            .databases
+            .get(key)
+            .into_iter()
+            .flatten()
+            .filter(|s| s.as_str() != source)
+            .map(|other| {
+                Ok(Resolved {
+                    target: other.clone(),
+                    edge_type: EdgeType::Database,
+                    confidence: Confidence::Inferred,
+                    detail: format!("shared database {key} with {other}"),
+                    source: None,
+                })
+            })
+            .collect();
+        if out.is_empty() {
+            return vec![Err(Unresolved::Ignored)];
+        }
+        out
+    }
+
+    /// Exact package name first, then the longest declared name that is a
+    /// prefix ending at `/`, `.` or `:` (`@acme/shared/utils`,
+    /// `github.com/acme/demo/cart/genproto`, `Basket.API.Grpc`).
+    fn resolve_package(
+        &self,
+        source: &str,
+        name: &str,
+        how: &str,
+        hint: Option<EdgeType>,
+    ) -> Result<Resolved, Unresolved> {
+        let packages = &self.config.packages;
+        let owner = packages
+            .iter()
+            .find(|p| p.name == name)
+            .or_else(|| packages.iter().find(|p| p.name.eq_ignore_ascii_case(name)))
+            .or_else(|| {
+                packages
+                    .iter()
+                    .filter(|p| {
+                        name.len() > p.name.len()
+                            && name.starts_with(p.name.as_str())
+                            && name[p.name.len()..].starts_with(['/', '.', ':'])
+                    })
+                    .max_by_key(|p| p.name.len())
+            })
+            .map(|p| p.service.as_str())
+            .ok_or(Unresolved::Ignored)?;
+        finish(
+            source,
+            owner,
+            EdgeType::Import,
+            Confidence::Static,
+            how.to_string(),
+            hint,
+        )
+    }
+
+    pub fn service_for_path(&self, path: &str) -> Option<&str> {
+        crate::map::owner_of_path(self.services, path)
     }
 
     fn resolve_env(
@@ -545,8 +851,10 @@ impl<'a> Resolver<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::map::{Target, TopicRole, owner_of_path};
     use crate::model::{DiscoveryStrategy, Evidence, ServiceRole, ServiceSource};
     use pretty_assertions::assert_eq;
+    use std::collections::BTreeSet;
 
     fn svc(name: &str, image: Option<&str>) -> Service {
         Service {
@@ -597,7 +905,7 @@ mod tests {
             &[("redis", "redis:7")],
         );
         let cfg = ConfigIndex::default();
-        let r = Resolver::new(&s, &cfg, HashMap::new());
+        let r = Resolver::new(&s, &cfg, Joins::default());
         assert_eq!(r.service_for_host("cart"), Some("cart"));
         assert_eq!(
             r.service_for_host("cart.default.svc.cluster.local"),
@@ -621,7 +929,7 @@ mod tests {
             &[("redis", "redis:7"), ("rabbitmq", "rabbitmq:3")],
         );
         let cfg = ConfigIndex::default();
-        let r = Resolver::new(&s, &cfg, HashMap::new());
+        let r = Resolver::new(&s, &cfg, Joins::default());
         let ok = |t: Target| r.resolve("web", &cand(t)).unwrap();
         let c = ok(Target::Url("http://catalogue:8080/products".into()));
         assert_eq!(
@@ -686,7 +994,7 @@ mod tests {
             5,
         );
         let s = services(&["catalogue", "user", "cart"], &[]);
-        let r = Resolver::new(&s, &cfg, HashMap::new());
+        let r = Resolver::new(&s, &cfg, Joins::default());
         let c = r
             .resolve(
                 "web",
@@ -762,7 +1070,14 @@ mod tests {
         owner.insert("CartService".to_string(), "cart".to_string());
         let cfg = ConfigIndex::default();
         let s = services(&["cart", "user", "catalogue"], &[]);
-        let r = Resolver::new(&s, &cfg, owner);
+        let r = Resolver::new(
+            &s,
+            &cfg,
+            Joins {
+                proto_owner: owner,
+                ..Joins::default()
+            },
+        );
         let c = r
             .resolve(
                 "web",
@@ -850,5 +1165,327 @@ mod tests {
         );
         assert_eq!(host_port("payment:50051"), Some("payment".into()));
         assert_eq!(host_port("http://x"), None);
+    }
+
+    #[test]
+    #[allow(clippy::bool_comparison, clippy::manual_assert_eq)]
+    fn hostish_keys_and_connection_strings() {
+        assert!(is_hostish_key("spring.data.mongodb.host"));
+        assert!(is_hostish_key("bootstrap-servers"));
+        assert!(is_hostish_key("host"));
+        assert!(is_hostish_key("spring.kafka.bootstrap-servers"));
+        assert!(is_hostish_key("DB_CONNECTION_STRING"));
+        assert!(is_hostish_key("eureka.client.serviceUrl.defaultZone") == false);
+        assert!(!is_hostish_key("spring.data.mongodb.database"));
+        assert!(!is_hostish_key("name") && !is_hostish_key("image"));
+        assert!(is_hostish_var("DB_CONNECTION_STRING") && is_hostish_var("PDO_DSN"));
+        assert_eq!(
+            ado_connection("Host=localhost;Database=LedgerDB;Username=postgres;Password=x"),
+            Some(("localhost".into(), "ledgerdb".into()))
+        );
+        assert_eq!(
+            ado_connection("Server=sql,1433;Initial Catalog=Shop;User Id=sa"),
+            Some(("sql".into(), "shop".into()))
+        );
+        assert_eq!(
+            ado_connection("Data Source=sql:5432;Database=Shop"),
+            Some(("sql".into(), "shop".into()))
+        );
+        assert_eq!(ado_connection("Host=localhost;Username=postgres"), None);
+        assert_eq!(ado_connection("mongodb://mongodb/x"), None);
+    }
+
+    fn set(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(ToString::to_string).collect()
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn topics_fan_out_from_either_side() {
+        let s = services(&["payment", "dispatch", "audit", "web"], &[]);
+        let cfg = ConfigIndex::default();
+        let mut joins = Joins::default();
+        joins.topics.insert(
+            "orders".into(),
+            TopicSides {
+                producers: set(&["payment"]),
+                consumers: set(&["dispatch", "audit"]),
+                unknown: BTreeSet::new(),
+            },
+        );
+        joins.topics.insert(
+            "refunds".into(),
+            TopicSides {
+                producers: set(&["payment"]),
+                ..TopicSides::default()
+            },
+        );
+        joins.topics.insert(
+            "robot-shop".into(),
+            TopicSides {
+                producers: set(&["payment"]),
+                consumers: BTreeSet::new(),
+                unknown: set(&["dispatch", "payment"]),
+            },
+        );
+        let r = Resolver::new(&s, &cfg, joins);
+        let topic = |key: &str, role: TopicRole| Candidate {
+            target: Target::Topic {
+                key: key.into(),
+                role,
+            },
+            kind_hint: Some(EdgeType::Event),
+            evidence: ev(),
+        };
+        let out = r.resolve_all("payment", &topic("orders", TopicRole::Producer));
+        let got: Vec<(String, Option<String>, EdgeType, Confidence, String)> = out
+            .into_iter()
+            .map(|o| {
+                let o = o.unwrap();
+                (o.target, o.source, o.edge_type, o.confidence, o.detail)
+            })
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    "audit".into(),
+                    None,
+                    EdgeType::Event,
+                    Confidence::Inferred,
+                    "publishes \"orders\", consumed by audit".into()
+                ),
+                (
+                    "dispatch".into(),
+                    None,
+                    EdgeType::Event,
+                    Confidence::Inferred,
+                    "publishes \"orders\", consumed by dispatch".into()
+                ),
+            ]
+        );
+        let out = r.resolve_all("dispatch", &topic("orders", TopicRole::Consumer));
+        assert_eq!(out.len(), 1);
+        let o = out[0].clone().unwrap();
+        assert_eq!(
+            (o.target.as_str(), o.source.as_deref(), o.detail.as_str()),
+            (
+                "dispatch",
+                Some("payment"),
+                "consumes \"orders\", published by payment"
+            )
+        );
+        assert_eq!(
+            r.resolve_all("payment", &topic("refunds", TopicRole::Producer)),
+            vec![Err(Unresolved::Unknown("topic:refunds".into()))]
+        );
+        let out = r.resolve_all("dispatch", &topic("robot-shop", TopicRole::Unknown));
+        assert_eq!(out.len(), 1);
+        let o = out[0].clone().unwrap();
+        assert_eq!(
+            (o.target.as_str(), o.source.as_deref(), o.detail.as_str()),
+            (
+                "dispatch",
+                Some("payment"),
+                "mentions \"robot-shop\", published by payment"
+            )
+        );
+        assert_eq!(
+            r.resolve_all("payment", &topic("robot-shop", TopicRole::Producer)),
+            vec![Ok(Resolved {
+                target: "dispatch".into(),
+                edge_type: EdgeType::Event,
+                confidence: Confidence::Inferred,
+                detail: "publishes \"robot-shop\", mentioned by dispatch".into(),
+                source: None,
+            })],
+            "an unknown-role mention counts as a counterpart, never the producer itself"
+        );
+        assert_eq!(
+            r.resolve_all("web", &topic("nothing", TopicRole::Unknown)),
+            vec![Err(Unresolved::Ignored)]
+        );
+    }
+
+    #[test]
+    fn brokers_resolve_by_library_family() {
+        let s = services(
+            &["payment"],
+            &[("rabbitmq", "rabbitmq:3-management"), ("redis", "redis:7")],
+        );
+        let cfg = ConfigIndex::default();
+        let r = Resolver::new(&s, &cfg, Joins::default());
+        let broker = |family: &str| Candidate {
+            target: Target::Broker {
+                family: family.into(),
+                how: format!("imports pika ({family} client)"),
+            },
+            kind_hint: Some(EdgeType::Event),
+            evidence: ev(),
+        };
+        let out = r.resolve_all("payment", &broker("rabbitmq"));
+        assert_eq!(out.len(), 1);
+        let o = out[0].clone().unwrap();
+        assert_eq!(
+            (
+                o.target.as_str(),
+                o.edge_type,
+                o.confidence,
+                o.detail.as_str()
+            ),
+            (
+                "rabbitmq",
+                EdgeType::Event,
+                Confidence::Inferred,
+                "imports pika (rabbitmq client)"
+            )
+        );
+        assert_eq!(
+            r.resolve_all("payment", &broker("kafka")),
+            vec![Err(Unresolved::Ignored)]
+        );
+        assert_eq!(
+            r.resolve_all("rabbitmq", &broker("rabbitmq")),
+            vec![Err(Unresolved::SelfEdge)]
+        );
+    }
+
+    #[test]
+    fn shared_databases_join_every_other_user() {
+        let s = services(&["orders", "reports", "ledger"], &[]);
+        let cfg = ConfigIndex::default();
+        let mut joins = Joins::default();
+        joins
+            .databases
+            .insert("mysql/shop".into(), set(&["orders", "reports"]));
+        joins.databases.insert("ledgerdb".into(), set(&["ledger"]));
+        let r = Resolver::new(&s, &cfg, joins);
+        let db = |key: &str| Candidate {
+            target: Target::Database(key.into()),
+            kind_hint: Some(EdgeType::Database),
+            evidence: ev(),
+        };
+        let out = r.resolve_all("orders", &db("mysql/shop"));
+        assert_eq!(
+            out,
+            vec![Ok(Resolved {
+                target: "reports".into(),
+                edge_type: EdgeType::Database,
+                confidence: Confidence::Inferred,
+                detail: "shared database mysql/shop with reports".into(),
+                source: None,
+            })]
+        );
+        assert_eq!(
+            r.resolve_all("ledger", &db("ledgerdb")),
+            vec![Err(Unresolved::Ignored)]
+        );
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)]
+    fn packages_resolve_exact_prefix_and_path() {
+        let mut s = services(
+            &[
+                "web",
+                "shared",
+                "cart",
+                "checkout",
+                "Basket.API",
+                "EventBus",
+            ],
+            &[],
+        );
+        for svc in &mut s {
+            if svc.name == "Basket.API" || svc.name == "EventBus" {
+                svc.root = Some(format!("src/{}", svc.name));
+            }
+        }
+        let mut cfg = ConfigIndex::default();
+        let pkg = |name: &str, service: &str| crate::map::config::Package {
+            name: name.into(),
+            service: service.into(),
+            evidence: ev(),
+        };
+        cfg.packages.push(pkg("@acme/shared", "shared"));
+        cfg.packages
+            .push(pkg("github.com/acme/demo/services/cart", "cart"));
+        let r = Resolver::new(&s, &cfg, Joins::default());
+        let package = |name: &str| Candidate {
+            target: Target::Package {
+                name: name.into(),
+                how: format!("import {name}"),
+            },
+            kind_hint: Some(EdgeType::Import),
+            evidence: ev(),
+        };
+        let o = r.resolve("web", &package("@acme/shared/utils")).unwrap();
+        assert_eq!(
+            (
+                o.target.as_str(),
+                o.edge_type,
+                o.confidence,
+                o.detail.as_str()
+            ),
+            (
+                "shared",
+                EdgeType::Import,
+                Confidence::Static,
+                "import @acme/shared/utils"
+            )
+        );
+        assert_eq!(
+            r.resolve(
+                "checkout",
+                &package("github.com/acme/demo/services/cart/genproto")
+            )
+            .unwrap()
+            .target,
+            "cart"
+        );
+        assert_eq!(
+            r.resolve(
+                "checkout",
+                &package("github.com/acme/demo/services/cartography")
+            ),
+            Err(Unresolved::Ignored),
+            "a prefix must end at a separator"
+        );
+        assert_eq!(
+            r.resolve("web", &package("express")),
+            Err(Unresolved::Ignored)
+        );
+        assert_eq!(
+            r.resolve("shared", &package("@acme/shared")),
+            Err(Unresolved::SelfEdge)
+        );
+        let path = |path: &str| Candidate {
+            target: Target::PackagePath {
+                path: path.into(),
+                how: "ProjectReference ..\\EventBus\\EventBus.csproj".into(),
+            },
+            kind_hint: Some(EdgeType::Import),
+            evidence: ev(),
+        };
+        let o = r
+            .resolve("Basket.API", &path("src/EventBus/EventBus.csproj"))
+            .unwrap();
+        assert_eq!(
+            (o.target.as_str(), o.confidence),
+            ("EventBus", Confidence::Static)
+        );
+        assert_eq!(
+            r.resolve("Basket.API", &path("src/Nowhere/X.csproj")),
+            Err(Unresolved::Ignored)
+        );
+        assert_eq!(
+            owner_of_path(&s, "src/EventBus/EventBus.csproj"),
+            Some("EventBus")
+        );
+        assert_eq!(
+            owner_of_path(&s, "src/EventBusRabbitMQ/x.cs"),
+            None,
+            "a root prefix ends at a slash"
+        );
     }
 }
