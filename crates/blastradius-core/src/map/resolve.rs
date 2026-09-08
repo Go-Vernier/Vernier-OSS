@@ -11,7 +11,7 @@ use super::config::ConfigIndex;
 use super::facts::{Part, env_default};
 use super::{Candidate, Target, TopicRole};
 use crate::discover::directories::{image_basename, normalise};
-use crate::model::{Confidence, EdgeType, Service};
+use crate::model::{Confidence, EdgeType, Service, ServiceRole};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Resolved {
@@ -624,7 +624,10 @@ impl<'a> Resolver<'a> {
         out
     }
 
-    /// Discovered services whose name or image names the broker family.
+    /// A broker family is named by an infrastructure service's name or
+    /// image, or by a code service's image (a code service that builds a
+    /// broker image is still the broker; one merely *named* like one, such
+    /// as a `kafka-consumer` that imports the client library, is not).
     fn resolve_broker(
         &self,
         source: &str,
@@ -641,12 +644,21 @@ impl<'a> Resolver<'a> {
         };
         let mut out = Vec::new();
         for s in self.services {
-            let mut haystack = s.name.to_lowercase();
-            if let Some(image) = image_basename(s.image.as_deref()) {
-                haystack.push(' ');
-                haystack.push_str(&image.to_lowercase());
-            }
-            if aliases.iter().any(|a| haystack.contains(a)) {
+            let is_broker = match s.role {
+                ServiceRole::Infrastructure => {
+                    let mut haystack = s.name.to_lowercase();
+                    if let Some(image) = image_basename(s.image.as_deref()) {
+                        haystack.push(' ');
+                        haystack.push_str(&image.to_lowercase());
+                    }
+                    aliases.iter().any(|a| haystack.contains(a))
+                }
+                ServiceRole::Code => image_basename(s.image.as_deref()).is_some_and(|image| {
+                    let image = image.to_lowercase();
+                    aliases.iter().any(|a| image.contains(a))
+                }),
+            };
+            if is_broker {
                 out.push(finish(
                     source,
                     &s.name,
@@ -1309,10 +1321,16 @@ mod tests {
 
     #[test]
     fn brokers_resolve_by_library_family() {
-        let s = services(
+        let mut s = services(
             &["payment"],
             &[("rabbitmq", "rabbitmq:3-management"), ("redis", "redis:7")],
         );
+        // A code service merely named like a broker is not the broker...
+        s.push(svc("kafka-consumer", None));
+        // ...but a code service that builds a broker image is.
+        let mut broker_image = svc("broker", Some("confluentinc/cp-kafka:7.6.0"));
+        broker_image.role = ServiceRole::Code;
+        s.push(broker_image);
         let cfg = ConfigIndex::default();
         let r = Resolver::new(&s, &cfg, Joins::default());
         let broker = |family: &str| Candidate {
@@ -1340,9 +1358,12 @@ mod tests {
                 "imports pika (rabbitmq client)"
             )
         );
+        let out = r.resolve_all("payment", &broker("kafka"));
+        assert_eq!(out.len(), 1, "kafka-consumer is a client, not the broker");
         assert_eq!(
-            r.resolve_all("payment", &broker("kafka")),
-            vec![Err(Unresolved::Ignored)]
+            out[0].clone().unwrap().target,
+            "broker",
+            "a code service that builds a broker image is still the broker"
         );
         assert_eq!(
             r.resolve_all("rabbitmq", &broker("rabbitmq")),

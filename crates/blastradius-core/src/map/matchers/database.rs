@@ -1,7 +1,7 @@
 //! Which database each service uses, keyed by host and database name, so two
 //! services on the same key get a database edge between them. The edge to the
 //! datastore itself comes from the http matcher, which types edges by target.
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::LazyLock;
 
 use regex::Regex;
@@ -28,6 +28,11 @@ static PDO_DSN: LazyLock<Regex> = LazyLock::new(|| {
 /// database name and are left out.
 static NAMED_RESOURCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\.(Add(?:Npgsql|SqlServer|MySql|Oracle|MongoDB|Cosmos)\w*(?:DbContext|DataSource|Client)|GetConnectionString)$").unwrap()
+});
+/// The declaration half of `NAMED_RESOURCE`: a service that calls one of
+/// these is the owner of the resource name, not just a reader of it.
+static DECLARED_RESOURCE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\.(Add(?:Npgsql|SqlServer|MySql|Oracle|MongoDB|Cosmos)\w*(?:DbContext|DataSource|Client))$").unwrap()
 });
 static OBJECT_HOST: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)\bhost(?:name)?\s*[:=]\s*['"]([^'"]+)['"]"#).unwrap());
@@ -131,29 +136,43 @@ fn evidence(ctx: &FileContext<'_>, line: u32, detail: String) -> Evidence {
     }
 }
 
-fn push(out: &mut Vec<(String, Evidence)>, key: String, ev: Evidence) {
-    if !out.iter().any(|(k, _)| *k == key) {
-        out.push((key, ev));
+/// A database key found in one file: the key itself, where it came from,
+/// and whether it is merely a name *looked up* (`GetConnectionString`)
+/// rather than *declared* as a resource.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DbKey {
+    pub key: String,
+    pub evidence: Evidence,
+    pub from_lookup: bool,
+}
+
+fn push(out: &mut Vec<DbKey>, key: String, evidence: Evidence, from_lookup: bool) {
+    if !out.iter().any(|k| k.key == key) {
+        out.push(DbKey {
+            key,
+            evidence,
+            from_lookup,
+        });
     }
 }
 
 /// Every database key one file uses, in fact order, one entry per key.
 #[allow(clippy::too_many_lines)]
-pub fn keys(ctx: &FileContext<'_>) -> Vec<(String, Evidence)> {
-    let mut out: Vec<(String, Evidence)> = Vec::new();
+pub fn keys(ctx: &FileContext<'_>) -> Vec<DbKey> {
+    let mut out: Vec<DbKey> = Vec::new();
     let mut host_setting: Option<(String, String)> = None;
     let mut db_setting: Option<(String, String, u32)> = None;
     for fact in ctx.facts {
         match fact {
             Fact::Str { value, line } => {
                 if let Some(key) = key_from_value(value) {
-                    push(&mut out, key, evidence(ctx, *line, value.clone()));
+                    push(&mut out, key, evidence(ctx, *line, value.clone()), false);
                 }
             }
             Fact::Template { parts, line } => {
                 if let Some(rendered) = render(ctx, parts) {
                     if let Some(key) = key_from_value(&rendered) {
-                        push(&mut out, key, evidence(ctx, *line, rendered));
+                        push(&mut out, key, evidence(ctx, *line, rendered), false);
                     }
                 }
             }
@@ -172,6 +191,7 @@ pub fn keys(ctx: &FileContext<'_>) -> Vec<(String, Evidence)> {
                             &mut out,
                             key,
                             evidence(ctx, *line, format!("{name}={} via {at}", configured.value)),
+                            false,
                         );
                         continue;
                     }
@@ -182,13 +202,19 @@ pub fn keys(ctx: &FileContext<'_>) -> Vec<(String, Evidence)> {
                             &mut out,
                             key,
                             evidence(ctx, *line, format!("{name} default {default}")),
+                            false,
                         );
                     }
                 }
             }
             Fact::Setting { key, value, line } => {
                 if let Some(k) = key_from_value(value) {
-                    push(&mut out, k, evidence(ctx, *line, format!("{key}={value}")));
+                    push(
+                        &mut out,
+                        k,
+                        evidence(ctx, *line, format!("{key}={value}")),
+                        false,
+                    );
                     continue;
                 }
                 let last = key.rsplit('.').next().unwrap_or(key).to_lowercase();
@@ -205,10 +231,12 @@ pub fn keys(ctx: &FileContext<'_>) -> Vec<(String, Evidence)> {
                 let plain = strip_generics(callee);
                 if NAMED_RESOURCE.is_match(&plain) {
                     if let Some(Arg::Str(name)) = args.iter().find(|a| matches!(a, Arg::Str(_))) {
+                        let from_lookup = !DECLARED_RESOURCE.is_match(&plain);
                         push(
                             &mut out,
                             name.to_lowercase(),
                             evidence(ctx, *line, format!("{callee}(\"{name}\")")),
+                            from_lookup,
                         );
                     }
                     continue;
@@ -226,6 +254,7 @@ pub fn keys(ctx: &FileContext<'_>) -> Vec<(String, Evidence)> {
                             &mut out,
                             format!("{host}/{db}"),
                             evidence(ctx, *line, format!("{callee} host={host} database={db}")),
+                            false,
                         );
                     }
                 }
@@ -238,17 +267,45 @@ pub fn keys(ctx: &FileContext<'_>) -> Vec<(String, Evidence)> {
             &mut out,
             format!("{}/{}", host.to_lowercase(), db.to_lowercase()),
             evidence(ctx, line, format!("{hk}={host}, {dk}={db}")),
+            false,
         );
     }
     out
 }
 
-/// key -> services using it.
+/// The lowercased resource name of every call a service uses to *declare* a
+/// database, data source or client (`Add*DbContext`, `Add*DataSource`,
+/// `Add*Client`) across the whole repository. A connection-string name that
+/// is only ever *looked up* (`GetConnectionString`) and never declared this
+/// way is not in this set.
+pub fn declared_resources(extractions: &[(String, String, Extraction)]) -> HashSet<String> {
+    let mut declared = HashSet::new();
+    for (_, _, ex) in extractions {
+        for fact in &ex.facts {
+            let Fact::Call { callee, args, .. } = fact else {
+                continue;
+            };
+            let plain = strip_generics(callee);
+            if !DECLARED_RESOURCE.is_match(&plain) {
+                continue;
+            }
+            if let Some(Arg::Str(name)) = args.iter().find(|a| matches!(a, Arg::Str(_))) {
+                declared.insert(name.to_lowercase());
+            }
+        }
+    }
+    declared
+}
+
+/// key -> services using it. A key that only ever came from a connection-
+/// string lookup (`GetConnectionString`) joins nothing unless some service
+/// also declares that same name as a resource.
 pub fn database_index(
     extractions: &[(String, String, Extraction)],
     config: &ConfigIndex,
     symbols: &Symbols,
 ) -> HashMap<String, BTreeSet<String>> {
+    let declared = declared_resources(extractions);
     let mut index: HashMap<String, BTreeSet<String>> = HashMap::new();
     for (service, file, ex) in extractions {
         let ctx = FileContext {
@@ -258,8 +315,11 @@ pub fn database_index(
             config,
             symbols,
         };
-        for (key, _) in keys(&ctx) {
-            index.entry(key).or_default().insert(service.clone());
+        for db_key in keys(&ctx) {
+            if db_key.from_lookup && !declared.contains(&db_key.key) {
+                continue;
+            }
+            index.entry(db_key.key).or_default().insert(service.clone());
         }
     }
     index
@@ -273,10 +333,10 @@ impl Matcher for Database {
     fn candidates(&self, ctx: &FileContext<'_>) -> Vec<Candidate> {
         keys(ctx)
             .into_iter()
-            .map(|(key, evidence)| Candidate {
-                target: Target::Database(key),
+            .map(|db_key| Candidate {
+                target: Target::Database(db_key.key),
                 kind_hint: Some(EdgeType::Database),
-                evidence,
+                evidence: db_key.evidence,
             })
             .collect()
     }
@@ -286,9 +346,13 @@ impl Matcher for Database {
 mod tests {
     use super::*;
     use crate::map::config::ConfigIndex;
-    use crate::map::facts::{Arg, Part};
+    use crate::map::facts::{Arg, Parser, Part};
     use crate::map::symbols::Symbols;
     use pretty_assertions::assert_eq;
+
+    fn set(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(ToString::to_string).collect()
+    }
 
     #[test]
     fn keys_from_urls_and_connection_strings() {
@@ -417,7 +481,7 @@ mod tests {
         };
         let got: Vec<(String, u32, String)> = keys(&ctx)
             .into_iter()
-            .map(|(k, e)| (k, e.line.unwrap(), e.detail.unwrap()))
+            .map(|k| (k.key, k.evidence.line.unwrap(), k.evidence.detail.unwrap()))
             .collect();
         assert_eq!(
             got,
@@ -469,6 +533,54 @@ mod tests {
                     "spring.data.mongodb.host=mongodb, spring.data.mongodb.database=inventory".into()
                 ),
             ]
+        );
+    }
+
+    #[test]
+    fn lookup_names_need_a_declaration() {
+        let cfg = ConfigIndex::default();
+        let symbols = Symbols::default();
+        let lookup = |service: &str| -> (String, String, Extraction) {
+            (
+                service.into(),
+                format!("{service}/Program.cs"),
+                Extraction {
+                    facts: vec![Fact::Call {
+                        callee: "builder.Configuration.GetConnectionString".into(),
+                        args: vec![Arg::Str("DefaultConnection".into())],
+                        line: 1,
+                    }],
+                    parser: Parser::Regex,
+                    language: "x".into(),
+                },
+            )
+        };
+        let mut extractions = vec![lookup("alpha"), lookup("beta")];
+        let index = database_index(&extractions, &cfg, &symbols);
+        assert_eq!(
+            index.get("defaultconnection"),
+            None,
+            "two lookups of the ASP.NET template default do not share a database"
+        );
+
+        extractions.push((
+            "gamma".into(),
+            "gamma/Program.cs".into(),
+            Extraction {
+                facts: vec![Fact::Call {
+                    callee: "builder.AddNpgsqlDataSource".into(),
+                    args: vec![Arg::Str("DefaultConnection".into())],
+                    line: 1,
+                }],
+                parser: Parser::Regex,
+                language: "x".into(),
+            },
+        ));
+        let index = database_index(&extractions, &cfg, &symbols);
+        assert_eq!(
+            index.get("defaultconnection"),
+            Some(&set(&["alpha", "beta", "gamma"])),
+            "gamma's declaration makes the name a real shared key"
         );
     }
 }
