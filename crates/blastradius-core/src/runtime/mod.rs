@@ -2,6 +2,8 @@
 //! OpenTelemetry servicegraph scrape, an OTLP JSON span export or Datadog's
 //! service dependency map, matched to the discovered services and merged
 //! into the graph. Every source produces the same `RuntimeGraph`.
+pub mod datadog;
+pub mod otlp;
 pub mod prometheus;
 
 use std::collections::BTreeSet;
