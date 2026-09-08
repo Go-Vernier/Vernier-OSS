@@ -1,0 +1,118 @@
+{
+  "strategy": "docker-compose",
+  "code": [
+    "cart",
+    "catalogue",
+    "dispatch",
+    "load",
+    "mongodb",
+    "mysql",
+    "payment",
+    "ratings",
+    "shipping",
+    "user",
+    "web"
+  ],
+  "infrastructure": [
+    "rabbitmq",
+    "redis"
+  ],
+  "edges": [
+    {
+      "source": "web",
+      "target": "catalogue",
+      "type": "http"
+    },
+    {
+      "source": "web",
+      "target": "user",
+      "type": "http"
+    },
+    {
+      "source": "web",
+      "target": "cart",
+      "type": "http"
+    },
+    {
+      "source": "web",
+      "target": "shipping",
+      "type": "http"
+    },
+    {
+      "source": "web",
+      "target": "payment",
+      "type": "http"
+    },
+    {
+      "source": "web",
+      "target": "ratings",
+      "type": "http"
+    },
+    {
+      "source": "cart",
+      "target": "catalogue",
+      "type": "http"
+    },
+    {
+      "source": "cart",
+      "target": "redis",
+      "type": "database"
+    },
+    {
+      "source": "catalogue",
+      "target": "mongodb",
+      "type": "database"
+    },
+    {
+      "source": "user",
+      "target": "mongodb",
+      "type": "database"
+    },
+    {
+      "source": "user",
+      "target": "redis",
+      "type": "database"
+    },
+    {
+      "source": "shipping",
+      "target": "mysql",
+      "type": "database"
+    },
+    {
+      "source": "shipping",
+      "target": "cart",
+      "type": "http"
+    },
+    {
+      "source": "payment",
+      "target": "user",
+      "type": "http"
+    },
+    {
+      "source": "payment",
+      "target": "cart",
+      "type": "http"
+    },
+    {
+      "source": "payment",
+      "target": "rabbitmq",
+      "type": "event"
+    },
+    {
+      "source": "ratings",
+      "target": "mysql",
+      "type": "database"
+    },
+    {
+      "source": "ratings",
+      "target": "catalogue",
+      "type": "http"
+    },
+    {
+      "source": "dispatch",
+      "target": "rabbitmq",
+      "type": "event"
+    },
+    { "source": "payment", "target": "dispatch", "type": "event" }
+  ]
+}

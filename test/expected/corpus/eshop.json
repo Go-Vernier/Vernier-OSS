@@ -1,0 +1,66 @@
+{
+  "strategy": "monorepo",
+  "code": [
+    "Basket.API",
+    "Catalog.API",
+    "ClientApp",
+    "EventBus",
+    "EventBusRabbitMQ",
+    "HybridApp",
+    "Identity.API",
+    "IntegrationEventLogEF",
+    "OrderProcessor",
+    "Ordering.API",
+    "Ordering.Domain",
+    "Ordering.Infrastructure",
+    "PaymentProcessor",
+    "WebApp",
+    "WebAppComponents",
+    "WebhookClient",
+    "Webhooks.API",
+    "eShop.AppHost",
+    "eShop.ServiceDefaults"
+  ],
+  "infrastructure": [],
+  "edges": [
+    {
+      "source": "WebApp",
+      "target": "Basket.API",
+      "type": "grpc"
+    },
+    {
+      "source": "WebApp",
+      "target": "Catalog.API",
+      "type": "http"
+    },
+    {
+      "source": "WebApp",
+      "target": "Ordering.API",
+      "type": "http"
+    },
+    {
+      "source": "WebhookClient",
+      "target": "Webhooks.API",
+      "type": "http"
+    },
+    { "source": "Basket.API", "target": "eShop.ServiceDefaults", "type": "import" },
+    { "source": "Basket.API", "target": "EventBusRabbitMQ", "type": "import" },
+    { "source": "EventBusRabbitMQ", "target": "EventBus", "type": "import" },
+    { "source": "Ordering.API", "target": "Ordering.Infrastructure", "type": "import" },
+    { "source": "Ordering.Infrastructure", "target": "Ordering.Domain", "type": "import" },
+    { "source": "WebApp", "target": "WebAppComponents", "type": "import" },
+    { "source": "HybridApp", "target": "WebAppComponents", "type": "import" },
+    { "source": "eShop.AppHost", "target": "Ordering.API", "type": "import" },
+    { "source": "Ordering.API", "target": "Basket.API", "type": "event" },
+    { "source": "Ordering.API", "target": "Catalog.API", "type": "event" },
+    { "source": "Ordering.API", "target": "WebApp", "type": "event" },
+    { "source": "Ordering.API", "target": "Webhooks.API", "type": "event" },
+    { "source": "Ordering.API", "target": "PaymentProcessor", "type": "event" },
+    { "source": "Catalog.API", "target": "Ordering.API", "type": "event" },
+    { "source": "Catalog.API", "target": "Webhooks.API", "type": "event" },
+    { "source": "OrderProcessor", "target": "Ordering.API", "type": "event" },
+    { "source": "PaymentProcessor", "target": "Ordering.API", "type": "event" },
+    { "source": "Ordering.API", "target": "OrderProcessor", "type": "database" },
+    { "source": "OrderProcessor", "target": "Ordering.API", "type": "database" }
+  ]
+}
