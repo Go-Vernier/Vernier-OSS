@@ -275,6 +275,10 @@ prefixes its path. Files outside every root are counted, not scanned.
 - The OpenTelemetry demo's Kafka topic is not found: the literal `"orders"`
   sits in a `return` statement one step removed from the variable the
   producer reads, and the facts layer reads assignments, not returns.
+- A connection-string name (`GetConnectionString("orderingdb")`) is a
+  database key only when some service declares that name as a resource
+  (`AddNpgsqlDataSource("orderingdb")`); `DefaultConnection` alone joins
+  nothing.
 
 ### Terminal report additions
 
