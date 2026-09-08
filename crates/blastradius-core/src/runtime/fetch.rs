@@ -22,11 +22,16 @@ pub fn read(input: &str) -> Result<String, RuntimeError> {
     })
 }
 
+/// A GET with a ten-second budget. A request that carries credentials
+/// follows no redirect, so the keys go to the host the user named and
+/// nowhere else.
 pub fn http_get(url: &str, headers: &[(&str, &str)]) -> Result<String, RuntimeError> {
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(TIMEOUT_SECONDS)))
-        .build()
-        .into();
+    let mut config =
+        ureq::Agent::config_builder().timeout_global(Some(Duration::from_secs(TIMEOUT_SECONDS)));
+    if !headers.is_empty() {
+        config = config.max_redirects(0);
+    }
+    let agent: ureq::Agent = config.build().into();
     let mut request = agent.get(url);
     for (name, value) in headers {
         request = request.header(*name, *value);

@@ -128,7 +128,9 @@ pub fn apply(graph: &mut BlastGraph, runtime: &RuntimeGraph, mapping: &[Mapping]
 }
 
 /// Promotes one edge: Observed, counts summed, one runtime evidence entry
-/// whose detail carries the running total.
+/// whose detail carries the running total. The runtime entry goes first:
+/// evidence is ordered strongest first, and production seeing the call is
+/// the strongest reason there is.
 fn confirm(edge: &mut Edge, call: &RuntimeCall, runtime: &RuntimeGraph, evidence: &Evidence) {
     edge.confidence = Confidence::Observed;
     let total = add_calls(edge.observed.as_ref().and_then(|o| o.calls), call.calls);
@@ -143,9 +145,12 @@ fn confirm(edge: &mut Edge, call: &RuntimeCall, runtime: &RuntimeGraph, evidence
         .find(|v| v.file == runtime.input && v.line.is_none())
     {
         Some(existing) => existing.detail = Some(text),
-        None => edge.evidence.push(Evidence {
-            detail: Some(text),
-            ..evidence.clone()
-        }),
+        None => edge.evidence.insert(
+            0,
+            Evidence {
+                detail: Some(text),
+                ..evidence.clone()
+            },
+        ),
     }
 }

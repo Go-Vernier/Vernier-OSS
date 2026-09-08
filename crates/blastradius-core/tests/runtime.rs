@@ -108,6 +108,12 @@ fn servicegraph_join_confirms_adds_and_skips_by_the_rules() {
         e.evidence
     );
     assert_eq!(
+        e.evidence[0].detail.as_deref(),
+        Some("132 calls (otel servicegraph)"),
+        "the runtime entry leads, so the EDGES table shows the call count: {:?}",
+        e.evidence
+    );
+    assert_eq!(
         edge(&a, "checkout", "catalogue", EdgeType::Http)
             .observed
             .as_ref()
@@ -270,6 +276,20 @@ fn report_with_a_runtime_source_shows_the_join() {
     );
     assert!(
         regex::Regex::new(
+            r"Services\s+8 of 10 runtime services matched \(1 ignored by blast-radius\.config\.json\)"
+        )
+        .unwrap()
+        .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(r"checkout\s+->\s+payment\s+http\s+observed\s+traces\.prom\s+132 calls")
+            .unwrap()
+            .is_match(&r),
+        "{r}"
+    );
+    assert!(
+        regex::Regex::new(
             r"Edges\s+4 observed \(3 static confirmed, 1 runtime only\) · 2 calls skipped"
         )
         .unwrap()
@@ -319,6 +339,137 @@ fn report_without_a_runtime_source_is_unchanged() {
     assert!(r.contains("not connected - static only"), "{r}");
     assert!(
         !r.contains("RUNTIME\n") && !r.contains("never observed"),
+        "{r}"
+    );
+}
+
+fn code_service(name: &str) -> Service {
+    Service {
+        name: name.into(),
+        root: Some(name.into()),
+        language: Some("go".into()),
+        entry_points: vec![],
+        role: ServiceRole::Code,
+        discovered_by: ServiceSource::Strategy(DiscoveryStrategy::Monorepo),
+        evidence: Evidence {
+            file: format!("{name}/go.mod"),
+            line: None,
+            detail: None,
+        },
+        image: None,
+        package_name: None,
+    }
+}
+
+#[test]
+#[allow(clippy::too_many_lines)]
+fn never_observed_leaves_out_shared_databases_and_imports_and_ignores_do_not_warn() {
+    let mut graph = BlastGraph::new();
+    for n in ["orders", "reports", "web"] {
+        graph.add_service(code_service(n));
+    }
+    let mut edge = |s: &str, t: &str, ty: EdgeType, c: Confidence, detail: &str| {
+        graph
+            .add_edge(Edge {
+                source: s.into(),
+                target: t.into(),
+                edge_type: ty,
+                confidence: c,
+                evidence: vec![Evidence {
+                    file: format!("{s}/x"),
+                    line: Some(1),
+                    detail: Some(detail.into()),
+                }],
+                observed: None,
+            })
+            .unwrap();
+    };
+    edge(
+        "orders",
+        "reports",
+        EdgeType::Database,
+        Confidence::Inferred,
+        "shared database mysql/shop with reports",
+    );
+    edge(
+        "reports",
+        "orders",
+        EdgeType::Database,
+        Confidence::Inferred,
+        "shared database mysql/shop with orders",
+    );
+    edge(
+        "web",
+        "orders",
+        EdgeType::Import,
+        Confidence::Static,
+        "import orders",
+    );
+    edge(
+        "web",
+        "reports",
+        EdgeType::Http,
+        Confidence::Static,
+        "http://reports:8080",
+    );
+    let analysis = Analysis {
+        repository: "acme/shop".into(),
+        root: std::path::PathBuf::from("/tmp/acme"),
+        discovery: Discovery {
+            strategy: Some(DiscoveryStrategy::Monorepo),
+            attempted: vec![],
+        },
+        graph,
+        mapping: MappingStats::default(),
+        runtime: Runtime {
+            connected: true,
+            source: Some(RuntimeSource::Otel),
+            input: Some("traces.prom".into()),
+            services: Some(RuntimeServices {
+                runtime: 3,
+                matched: 2,
+            }),
+            mapping: vec![
+                RuntimeMapping {
+                    runtime: "orders".into(),
+                    service: Some("orders".into()),
+                    how: "exact".into(),
+                },
+                RuntimeMapping {
+                    runtime: "reports".into(),
+                    service: Some("reports".into()),
+                    how: "exact".into(),
+                },
+                RuntimeMapping {
+                    runtime: "load-generator".into(),
+                    service: None,
+                    how: "ignored".into(),
+                },
+            ],
+            unmatched: vec![],
+            edges: Some(RuntimeEdges {
+                observed: 0,
+                runtime_only: 0,
+                skipped: 1,
+            }),
+            warnings: vec![],
+        },
+    };
+    let r = format_repo_report(&analysis, false);
+    assert!(
+        regex::Regex::new(r"Static edges never observed\s+1\n\s+web -> reports")
+            .unwrap()
+            .is_match(&r),
+        "only the http call is a path production could have taken: {r}"
+    );
+    assert!(
+        !r.contains("orders -> reports") && !r.contains("web -> orders"),
+        "{r}"
+    );
+    // Two matched plus one ignored is every runtime name accounted for: no partial-join wording.
+    assert!(r.contains("connected (OTel, 2 services matched)"), "{r}");
+    assert!(
+        r.contains("2 of 3 runtime services matched (1 ignored by blast-radius.config.json)"),
         "{r}"
     );
 }

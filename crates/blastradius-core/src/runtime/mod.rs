@@ -176,7 +176,20 @@ pub enum RuntimeInput {
 pub fn detect(text: &str, input: &str) -> Result<RuntimeGraph, RuntimeError> {
     let trimmed = text.trim_start();
     if trimmed.starts_with('{') {
-        return otlp::parse(text, input);
+        return match otlp::parse(text, input) {
+            // A Datadog dependency map is JSON too; say so instead of
+            // complaining about missing spans. Only when it really is one:
+            // no span export key, and at least one service with callees.
+            Err(_)
+                if !text.contains("\"resourceSpans\"")
+                    && datadog::parse(text, input).is_ok_and(|g| !g.calls.is_empty()) =>
+            {
+                Err(RuntimeError::Unsupported(format!(
+                    "{input} looks like a Datadog service_dependencies response; pass it with --datadog instead of --otel"
+                )))
+            }
+            other => other,
+        };
     }
     if prometheus::is_prometheus(text) {
         return prometheus::parse(text, input);
@@ -255,6 +268,18 @@ mod tests {
                 .contains("traces_service_graph_request_total")
                 && err.to_string().contains("OTLP"),
             "{err}"
+        );
+    }
+
+    #[test]
+    fn a_datadog_response_given_to_otel_is_pointed_at_the_right_flag() {
+        let err = detect(r#"{"checkout-api": {"calls": ["payment"]}}"#, "deps.json").unwrap_err();
+        assert!(matches!(err, RuntimeError::Unsupported(_)), "{err}");
+        assert!(err.to_string().contains("--datadog"), "{err}");
+        let err = detect(r#"{"resourceSpans": []}"#, "empty.json").unwrap_err();
+        assert!(
+            matches!(err, RuntimeError::Parse(_)),
+            "an empty export is still an OTLP error: {err}"
         );
     }
 

@@ -138,7 +138,8 @@ fn runtime_header(analysis: &Analysis, c: &Paint) -> String {
         }
         _ => source.label().to_string(),
     };
-    if services.matched < services.runtime {
+    // Names the user ignored on purpose are not a partial join.
+    if services.matched + ignored_count(analysis) < services.runtime {
         c.yellow(&format!(
             "connected ({what}, {} of {} runtime services matched)",
             services.matched, services.runtime
@@ -146,6 +147,15 @@ fn runtime_header(analysis: &Analysis, c: &Paint) -> String {
     } else {
         format!("connected ({what}, {} services matched)", services.matched)
     }
+}
+
+fn ignored_count(analysis: &Analysis) -> usize {
+    analysis
+        .runtime
+        .mapping
+        .iter()
+        .filter(|m| m.how == "ignored")
+        .count()
 }
 
 struct Row {
@@ -345,10 +355,15 @@ fn runtime_section(analysis: &Analysis, c: &Paint, out: &mut Vec<String>) {
         "Source",
         &format!("{}  {}", source.label(), r.input.as_deref().unwrap_or("")),
     ));
+    let ignored = ignored_count(analysis);
+    let ignored_note = match ignored {
+        0 => String::new(),
+        n => format!(" ({n} ignored by blast-radius.config.json)"),
+    };
     out.push(row(
         "Services",
         &format!(
-            "{} of {} runtime services matched",
+            "{} of {} runtime services matched{ignored_note}",
             services.matched, services.runtime
         ),
     ));
@@ -525,14 +540,27 @@ fn findings(
         out.push(format!("    {key:<36} {}", c.dim(&list)));
     }
     if runtime_connected {
-        never_observed_finding(edges, c, out);
+        never_observed_finding(edges, &code_names, c, out);
     }
 }
 
-fn never_observed_finding(edges: &[Edge], c: &Paint, out: &mut Vec<String>) {
+/// Call paths production never took. Imports are not calls, and a shared
+/// database between two code services is not one either, so neither can be
+/// observed and neither is listed.
+fn never_observed_finding(
+    edges: &[Edge],
+    code_names: &BTreeSet<&str>,
+    c: &Paint,
+    out: &mut Vec<String>,
+) {
     let never: Vec<String> = edges
         .iter()
         .filter(|e| e.observed.is_none() && e.edge_type != EdgeType::Import)
+        .filter(|e| {
+            !(e.edge_type == EdgeType::Database
+                && code_names.contains(e.source.as_str())
+                && code_names.contains(e.target.as_str()))
+        })
         .map(|e| format!("{} -> {}", e.source, e.target))
         .collect();
     out.push(String::new());

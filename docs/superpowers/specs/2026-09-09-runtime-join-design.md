@@ -281,3 +281,12 @@ source above carries them), Jaeger and Tempo APIs, sampling correction.
   lie about the export.
 - Edition 2024 makes `std::env::remove_var` unsafe; the live-Datadog unit
   test wraps the two key removals in an `unsafe` block with a SAFETY comment.
+- Review fixes after the first implementation: the runtime evidence entry
+  goes first on a confirmed edge (evidence is ordered strongest first, and
+  the EDGES table shows the first entry, so the call count is what a reader
+  sees); a request that carries Datadog keys follows no redirect; the
+  partial-join warning colour ignores names the config ignores on purpose,
+  and the RUNTIME section says how many were ignored; "Static edges never
+  observed" leaves out shared-database edges between two code services,
+  which are not calls and can never be observed; an `--otel` file that is
+  really a Datadog response says so and points at `--datadog`.

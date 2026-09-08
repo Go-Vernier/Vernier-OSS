@@ -236,7 +236,7 @@ With a servicegraph scrape from the fixture repository:
 RUNTIME
 
   Source        OTel  test/fixtures/runtime-app/runtime/traces.prom
-  Services      8 of 10 runtime services matched
+  Services      8 of 10 runtime services matched (1 ignored by blast-radius.config.json)
   Edges         4 observed (3 static confirmed, 1 runtime only) · 2 calls skipped, one end unmatched or ignored
 
   RUNTIME NAME       SERVICE        HOW
