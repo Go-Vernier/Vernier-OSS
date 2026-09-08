@@ -77,25 +77,9 @@ pub(super) fn extract(text: &str) -> Vec<Fact> {
             continue;
         }
         extract_line(raw, line, &mut facts);
-        let mut bound = setting_line(raw, line);
-        if let Some(assigned) = assignment_line(raw, line) {
-            if bound.as_ref() != Some(&assigned) {
-                bound = bound.or(Some(assigned));
-            }
-        }
-        facts.extend(bound);
+        facts.extend(setting_line(raw, line).or_else(|| assignment_line(raw, line)));
     }
     facts
-}
-
-/// Key/value settings from configuration files, one per line at most.
-/// Not yet called outside tests; a produced interface for a later task.
-#[allow(dead_code)]
-pub(super) fn settings(text: &str) -> Vec<Fact> {
-    text.lines()
-        .enumerate()
-        .filter_map(|(i, raw)| setting_line(raw, u32::try_from(i + 1).unwrap_or(u32::MAX)))
-        .collect()
 }
 
 /// Names assigned a string literal, for any language.
