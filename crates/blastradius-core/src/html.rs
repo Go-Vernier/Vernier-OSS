@@ -65,7 +65,7 @@ aside h2:first-child{margin-top:0}
 aside .name{font-size:20px;font-weight:700;font-family:var(--mono);margin:0 0 6px;word-break:break-word}
 aside .kv{display:grid;grid-template-columns:92px 1fr;gap:3px 10px;font-size:13px;margin:0}
 aside .kv dt{color:var(--muted)}aside .kv dd{margin:0;font-family:var(--mono);word-break:break-word}
-.badge{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600;font-family:var(--mono);color:#0d1117;vertical-align:middle}
+.badge{display:inline-block;padding:1px 7px;border-radius:9px;font-size:11px;font-weight:600;font-family:var(--mono);color:#0d1117;vertical-align:middle;white-space:nowrap}
 .badge.observed{background:var(--observed)}.badge.static{background:var(--static)}.badge.inferred{background:var(--inferred)}.badge.uncertain{background:var(--uncertain)}.badge.changed{background:var(--changed)}.badge.none{background:#2a3242;color:var(--muted)}
 .edge-row{padding:8px 0;border-top:1px solid var(--line);font-size:13px}
 .edge-row .head{display:flex;gap:8px;align-items:center;font-family:var(--mono);flex-wrap:wrap}
@@ -77,8 +77,10 @@ aside .kv dt{color:var(--muted)}aside .kv dd{margin:0;font-family:var(--mono);wo
 .finding{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-top:1px solid var(--line);font-size:13px}
 .finding .v{font-family:var(--mono);text-align:right}
 .finding .v small{display:block;color:var(--muted);font-family:var(--font)}
-table.reached{width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono)}
-table.reached td{padding:5px 6px 5px 0;vertical-align:top;border-top:1px solid var(--line)}
+table.reached{width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono);table-layout:fixed}
+table.reached td{padding:6px 6px 6px 0;vertical-align:top;border-top:1px solid var(--line);overflow-wrap:anywhere}
+table.reached td.svc{width:36%}table.reached td.svc small{display:block;color:var(--muted)}
+table.reached td.conf{width:27%}
 table.reached td.path{color:var(--muted);font-family:var(--font)}
 .fixed{font-size:13px;margin:6px 0}
 footer{display:flex;gap:18px;padding:8px 20px;border-top:1px solid var(--line);color:var(--muted);font-size:12px;flex-wrap:wrap}
@@ -90,11 +92,15 @@ footer .dash{width:16px;border-top:2px dashed var(--uncertain);display:inline-bl
 footer .note{margin-left:auto}
 .node{cursor:pointer}
 .node text{font-size:11px;fill:#cfd3dc;pointer-events:none;font-family:var(--mono)}
+svg.busy .node text{font-size:10px}
 .node.dim{opacity:.2}.edge.dim{opacity:.07}
 .node.faded{opacity:.25}.edge.faded{opacity:.06}
 .edge{fill:none}
 .edge.uncertain{stroke-dasharray:4 4}
 .node.hl circle,.node.hl rect{stroke:#fff;stroke-width:2.5}
+.node.quiet text{opacity:0}
+.node.quiet.near text{opacity:1}
+.node.faded.near{opacity:1}
 </style>
 </head>
 <body>
@@ -175,35 +181,59 @@ footer .note{margin-left:auto}
   function rand() { seed |= 0; seed = seed + 0x6D2B79F5 | 0; var t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
   function layout() {
     var n = nodes.length; if (!n) return;
-    var k = Math.sqrt(W * H / (n + 1)) * 0.8;
-    nodes.forEach(function (d, i) {
-      var a = i / n * 2 * Math.PI, r = Math.min(W, H) * 0.32;
-      d.x = W / 2 + r * Math.cos(a) + (rand() - 0.5) * 40;
-      d.y = H / 2 + r * Math.sin(a) + (rand() - 0.5) * 40;
+    var connected = nodes.filter(function (d) { return d.inbound.length || d.outbound.length; });
+    var isolated = nodes.filter(function (d) { return !d.inbound.length && !d.outbound.length; });
+    var pad = 70;
+    // nodes with no edge at all sit in rows along the bottom, out of the way
+    var perRow = Math.max(1, Math.floor((W - 2 * pad) / 56) + 1);
+    var rows = Math.ceil(isolated.length / perRow);
+    var bottom = rows ? rows * 40 + 10 : 0;
+    isolated.forEach(function (d, i) {
+      var row = Math.floor(i / perRow), col = i % perRow, inRow = Math.min(perRow, isolated.length - row * perRow);
+      d.x = inRow === 1 ? W / 2 : pad + col * (W - 2 * pad) / (inRow - 1);
+      d.y = H - pad / 2 - bottom + 24 + row * 40;
     });
-    var t = k;
-    for (var iter = 0; iter < 500; iter++) {
-      nodes.forEach(function (d) { d.dx = 0; d.dy = 0; });
-      for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) {
-        var a = nodes[i], b = nodes[j];
-        var dx = a.x - b.x, dy = a.y - b.y, dist = Math.max(0.5, Math.sqrt(dx * dx + dy * dy));
+    var m = connected.length; if (!m) return;
+    var boxW = W - 2 * pad, boxH = H - 2 * pad - bottom;
+    // Fruchterman-Reingold without walls: repulsion k^2/d, attraction d^2/k
+    // along edges, a gravity that holds separate components together; the
+    // result is then fitted into the box, so nothing sticks to a border
+    var k = Math.sqrt(boxW * boxH / m);
+    connected.forEach(function (d, i) {
+      var a = i / m * 2 * Math.PI, r = k * Math.sqrt(m) / 2;
+      d.x = r * Math.cos(a) + (rand() - 0.5) * k; d.y = r * Math.sin(a) + (rand() - 0.5) * k;
+    });
+    var t = k * 2;
+    for (var iter = 0; iter < 600; iter++) {
+      connected.forEach(function (d) { d.dx = 0; d.dy = 0; });
+      for (var i = 0; i < m; i++) for (var j = i + 1; j < m; j++) {
+        var a = connected[i], b = connected[j];
+        var dx = a.x - b.x, dy = a.y - b.y, dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
         var f = k * k / dist / dist;
         a.dx += dx * f; a.dy += dy * f; b.dx -= dx * f; b.dy -= dy * f;
       }
       A.edges.forEach(function (e) {
         var a = byId[e.source], b = byId[e.target]; if (!a || !b || a === b) return;
-        var dx = a.x - b.x, dy = a.y - b.y, dist = Math.max(0.5, Math.sqrt(dx * dx + dy * dy));
-        var f = dist / k * 0.6;
+        var dx = a.x - b.x, dy = a.y - b.y, dist = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        var f = dist / k;
         a.dx -= dx * f; a.dy -= dy * f; b.dx += dx * f; b.dy += dy * f;
       });
-      nodes.forEach(function (d) {
-        d.dx += (W / 2 - d.x) * 0.03; d.dy += (H / 2 - d.y) * 0.03;
+      // gravity holds separate components together; weaker sideways, so
+      // the cluster spreads into the wide box rather than a disc
+      connected.forEach(function (d) {
+        var aspect = Math.min(1, boxH / boxW);
+        d.dx -= d.x * 0.4 * aspect * aspect; d.dy -= d.y * 0.4;
         var len = Math.sqrt(d.dx * d.dx + d.dy * d.dy) || 1, step = Math.min(len, t);
-        d.x = Math.max(30, Math.min(W - 30, d.x + d.dx / len * step));
-        d.y = Math.max(30, Math.min(H - 40, d.y + d.dy / len * step));
+        d.x += d.dx / len * step; d.y += d.dy / len * step;
       });
-      t = Math.max(0.5, t * 0.975);
+      t = Math.max(0.2, t * 0.985);
     }
+    var minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    connected.forEach(function (d) { minX = Math.min(minX, d.x); maxX = Math.max(maxX, d.x); minY = Math.min(minY, d.y); maxY = Math.max(maxY, d.y); });
+    var spanX = Math.max(1, maxX - minX), spanY = Math.max(1, maxY - minY);
+    var scale = Math.min(boxW / spanX, boxH / spanY, 3.5);
+    var offX = pad + (boxW - spanX * scale) / 2, offY = pad + (boxH - spanY * scale) / 2;
+    connected.forEach(function (d) { d.x = offX + (d.x - minX) * scale; d.y = offY + (d.y - minY) * scale; });
   }
   layout();
 
@@ -233,9 +263,14 @@ footer .note{margin-left:auto}
     title.textContent = e.source + ' → ' + e.target + ' (' + e.type + ', ' + e.confidence + (e.observed && e.observed.calls ? ', ' + e.observed.calls + ' calls' : '') + ')';
     edgeEls.push({ e: e, a: a, b: b, el: line, n: pairIndex[[e.source, e.target].sort().join('|')].length });
   });
+  // on a big graph only the labels that carry information stay on; the rest
+  // appear when their node or a neighbour is hovered
+  var busy = nodes.length > 40;
+  if (busy) svg.classList.add('busy');
   nodes.forEach(function (n) {
     var infra = n.s.role !== 'code';
-    var cls = 'node' + (B && !changed[n.id] && !reached[n.id] ? ' dim' : '');
+    var loud = !busy || (B ? !!(changed[n.id] || reached[n.id]) : (!infra && n.inbound.length >= 2));
+    var cls = 'node' + (B && !changed[n.id] && !reached[n.id] ? ' dim' : '') + (loud ? '' : ' quiet');
     var g = el('g', { 'class': cls, 'data-id': n.id }, gNodes);
     var fill = n.conf ? COLORS[n.conf] : '#3a4356';
     var stroke = '#0d1117', sw = 1.5;
@@ -271,6 +306,7 @@ footer .note{margin-left:auto}
       var related = !id || n.id === id || n.inbound.some(function (e) { return e.source === id; }) || n.outbound.some(function (e) { return e.target === id; });
       nodeEls[n.id].classList.toggle('faded', !!id && !related);
       nodeEls[n.id].classList.toggle('hl', !!id && n.id === id);
+      nodeEls[n.id].classList.toggle('near', !!id && related);
     });
     edgeEls.forEach(function (x) { x.el.classList.toggle('faded', !!id && x.e.source !== id && x.e.target !== id); });
   }
@@ -358,9 +394,18 @@ footer .note{margin-left:auto}
     nodes.forEach(function (n) { var srcs = {}; n.inbound.forEach(function (e) { srcs[e.source] = 1; }); var c = Object.keys(srcs).length; if (c && (!most || c > most.c)) most = { id: n.id, c: c }; });
     if (most) h += finding('Most connected', esc(most.id), 'touched by ' + plural(most.c, 'service', 'services'));
     if (payload.widest && payload.widest.reached) h += finding('Widest change surface', esc(payload.widest.service), 'a change here reaches ' + plural(payload.widest.reached, 'service', 'services'));
+    // the same rule as the terminal report: a database edge between two code
+    // services whose evidence names a shared database
     var shared = {};
-    A.edges.forEach(function (e) { var a = byId[e.source], b = byId[e.target]; if (e.type === 'database' && a && b && a.s.role === 'code' && b.s.role === 'code') shared[[e.source, e.target].sort().join(' & ')] = 1; });
-    h += finding('Shared databases', Object.keys(shared).length, esc(Object.keys(shared).slice(0, 6).join(', ')));
+    A.edges.forEach(function (e) {
+      var a = byId[e.source], b = byId[e.target];
+      if (e.type !== 'database' || !a || !b || a.s.role !== 'code' || b.s.role !== 'code') return;
+      var key = null;
+      e.evidence.forEach(function (v) { if (!key && v.detail && v.detail.indexOf('shared database ') === 0) key = v.detail.slice(16).split(' with ')[0]; });
+      if (key) { shared[key] = shared[key] || {}; shared[key][e.source] = 1; shared[key][e.target] = 1; }
+    });
+    var sharedKeys = Object.keys(shared).sort();
+    h += finding('Shared databases', sharedKeys.length, esc(sharedKeys.slice(0, 4).map(function (k) { return k + ': ' + Object.keys(shared[k]).sort().join(', '); }).join(' · ')));
     if (rt.connected) {
       var neverObserved = A.edges.filter(function (e) { return !e.observed && e.type !== 'import' && !(e.type === 'database' && byId[e.source] && byId[e.target] && byId[e.source].s.role === 'code' && byId[e.target].s.role === 'code'); });
       h += finding('Static edges never observed', neverObserved.length, esc(neverObserved.slice(0, 5).map(function (e) { return e.source + ' → ' + e.target; }).join(', ')) + (neverObserved.length > 5 ? ', …' : ''));
@@ -386,7 +431,7 @@ footer .note{margin-left:auto}
     else h += '<p class="hint">None of the changed files belongs to a discovered service.</p>';
     if (B.unowned.length) h += '<p class="hint">' + plural(B.unowned.length, 'file belongs', 'files belong') + ' to no service: ' + esc(B.unowned.slice(0, 8).join(', ')) + (B.unowned.length > 8 ? ', …' : '') + '</p>';
     h += '<h2>Reached · ' + B.reached.length + '</h2>';
-    if (B.reached.length) h += '<table class="reached">' + B.reached.map(function (r) { return '<tr><td><strong>' + esc(r.service) + '</strong></td><td>' + r.depth + '</td><td>' + badge(r.confidence) + '</td><td class="path">' + pathWords(r.path) + '</td></tr>'; }).join('') + '</table>';
+    if (B.reached.length) h += '<table class="reached">' + B.reached.map(function (r) { return '<tr><td class="svc"><strong>' + esc(r.service) + '</strong><small>depth ' + r.depth + '</small></td><td class="conf">' + badge(r.confidence) + '</td><td class="path">' + pathWords(r.path) + '</td></tr>'; }).join('') + '</table>';
     else h += '<p class="hint">No static or observed path leads out of the changed services.</p>';
     if (B.infrastructure.length) h += '<h2>Infrastructure on the path</h2><p class="hint">' + B.infrastructure.map(function (t) { return esc(t.service) + ' (published to by ' + esc(t.via) + ')'; }).join(', ') + '. Every other client of such a broker is included as uncertain.</p>';
     h += '<h2>Not reached · ' + B.notReached.length + '</h2><p class="fixed hint">' + esc(payload.notReached) + '</p>';
