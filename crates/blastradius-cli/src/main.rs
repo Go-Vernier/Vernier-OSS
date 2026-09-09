@@ -2,7 +2,7 @@
 use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
-use blastradius::RuntimeInput;
+use blastradius::{Change, RuntimeInput, blast, git, history, html};
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -43,6 +43,25 @@ enum Cmd {
         /// Datadog site for a live call
         #[arg(long = "dd-site", value_name = "SITE", default_value = "datadoghq.com")]
         dd_site: String,
+        /// Blast radius of one pull request, found in the local git history or
+        /// in a fetched ref
+        #[arg(long, value_name = "NUMBER", conflicts_with_all = ["diff", "files"])]
+        pr: Option<u64>,
+        /// Blast radius of a git diff range, as `git diff --name-only` takes it
+        #[arg(long, value_name = "RANGE", conflicts_with = "files")]
+        diff: Option<String>,
+        /// Blast radius of these files, relative to the repository root
+        #[arg(long, value_name = "PATH", num_args = 1..)]
+        files: Vec<String>,
+        /// Blast radius of the last N pull requests, as a CHANGE HISTORY section
+        #[arg(long, value_name = "N")]
+        history: Option<usize>,
+        /// How many hops the walk follows from a changed service
+        #[arg(long, value_name = "N", default_value_t = blast::DEFAULT_DEPTH)]
+        depth: usize,
+        /// Write the self-contained HTML report to this file
+        #[arg(long, value_name = "PATH")]
+        html: Option<PathBuf>,
     },
 }
 
@@ -64,12 +83,29 @@ fn run() -> anyhow::Result<()> {
             datadog,
             dd_env,
             dd_site,
+            pr,
+            diff,
+            files,
+            history,
+            depth,
+            html,
         } => {
             let mut analysis = blastradius::analyze(&path)?;
             if let Some(input) = runtime_input(otel, datadog, dd_env, dd_site)? {
                 let config = blastradius::config::load(&analysis.root)?.runtime;
                 let graph = blastradius::runtime::load(&input)?;
                 blastradius::runtime::join(&mut analysis, graph, &config)?;
+            }
+            if let Some(change) = change_input(&analysis.root, pr, diff, &files)? {
+                analysis.blast = Some(blast::of_change(&analysis.graph, change, depth));
+            }
+            if let Some(n) = history {
+                analysis.history = Some(history::run(&analysis, n, depth)?);
+            }
+            if let Some(out) = &html {
+                std::fs::write(out, html::render(&analysis))
+                    .map_err(|e| anyhow::anyhow!("cannot write {}: {e}", out.display()))?;
+                eprintln!("vernier: wrote {}", out.display());
             }
             let mut out = std::io::stdout().lock();
             if json {
@@ -83,10 +119,30 @@ fn run() -> anyhow::Result<()> {
             let color = !no_color
                 && std::io::stdout().is_terminal()
                 && std::env::var_os("NO_COLOR").is_none();
-            writeln!(out, "{}", blastradius::format_repo_report(&analysis, color))?;
+            writeln!(out, "{}", blastradius::format_report(&analysis, color))?;
             Ok(())
         }
     }
+}
+
+/// The change the flags describe, if any. `--pr` and `--diff` read git;
+/// `--files` reads nothing.
+fn change_input(
+    root: &std::path::Path,
+    pr: Option<u64>,
+    diff: Option<String>,
+    files: &[String],
+) -> anyhow::Result<Option<Change>> {
+    if let Some(number) = pr {
+        return Ok(Some(git::pull_request(root, number)?));
+    }
+    if let Some(range) = diff {
+        return Ok(Some(git::diff(root, &range)?));
+    }
+    if !files.is_empty() {
+        return Ok(Some(Change::from_files(files)));
+    }
+    Ok(None)
 }
 
 /// Which runtime source the flags ask for, if any. A bare `--datadog` means a

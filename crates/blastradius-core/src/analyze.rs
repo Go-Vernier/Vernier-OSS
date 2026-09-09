@@ -7,9 +7,11 @@ use regex::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::blast::Blast;
 use crate::discover::{DiscoveryAttempt, discover_services};
 use crate::fs::{FileIndex, is_dir};
 use crate::graph::BlastGraph;
+use crate::history::History;
 use crate::map::{self, MappingStats};
 use crate::model::{DiscoveryStrategy, Edge, RuntimeSource, Service};
 
@@ -82,10 +84,13 @@ pub struct Analysis {
     pub graph: BlastGraph,
     pub mapping: MappingStats,
     pub runtime: Runtime,
+    /// Stage 4 fills these in when a change or a history was asked for.
+    pub blast: Option<Blast>,
+    pub history: Option<History>,
 }
 
 /// The JSON contract. Field order is part of it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AnalysisJson {
     pub repository: String,
@@ -95,6 +100,10 @@ pub struct AnalysisJson {
     pub edges: Vec<Edge>,
     pub mapping: MappingStats,
     pub runtime: Runtime,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blast: Option<Blast>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub history: Option<History>,
 }
 
 impl Analysis {
@@ -107,6 +116,8 @@ impl Analysis {
             edges: self.graph.edges().to_vec(),
             mapping: self.mapping.clone(),
             runtime: self.runtime.clone(),
+            blast: self.blast.clone(),
+            history: self.history.clone(),
         }
     }
 }
@@ -141,6 +152,8 @@ pub fn analyze(root: &Path) -> Result<Analysis, AnalyzeError> {
         graph,
         mapping: mapped.stats,
         runtime: Runtime::default(),
+        blast: None,
+        history: None,
     })
 }
 
