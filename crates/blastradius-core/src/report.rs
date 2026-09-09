@@ -1,10 +1,13 @@
-//! The repository report. It says what was found, how it was found, and
-//! what this version does not do yet. It never fills a gap with a guess.
+//! The terminal reports. The repository report says what was found and how;
+//! the change report says what a change can reach. Neither fills a gap with
+//! a guess.
 use owo_colors::OwoColorize;
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::analyze::Analysis;
+use crate::blast::{self, Blast, ChangeKind, Hop, Relation};
+use crate::history::{History, Unit};
 use crate::map::facts::Parser;
 use crate::model::{Confidence, Edge, EdgeType, Service, ServiceRole};
 
@@ -36,9 +39,77 @@ impl Paint {
     }
 }
 
+/// The change report when a change was analysed, else the repository report.
+pub fn format_report(analysis: &Analysis, color: bool) -> String {
+    if analysis.blast.is_some() {
+        format_change_report(analysis, color)
+    } else {
+        format_repo_report(analysis, color)
+    }
+}
+
 pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
     let c = Paint { color };
     let services = analysis.graph.services();
+    let infra: Vec<&Service> = services
+        .iter()
+        .filter(|s| s.role == ServiceRole::Infrastructure)
+        .collect();
+    let mut out: Vec<String> = Vec::new();
+    header(analysis, &services, &c, &mut out);
+
+    if !services.is_empty() {
+        out.push(c.bold("SERVICES"));
+        out.push(String::new());
+        out.extend(table(&services, &c));
+        out.push(String::new());
+        if !infra.is_empty() {
+            let names = infra
+                .iter()
+                .map(|s| s.name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.push(format!(
+                "  {}",
+                c.dim(&format!(
+                    "{} declared but not built here (images): {names}",
+                    infra.len()
+                ))
+            ));
+            out.push(String::new());
+        }
+    }
+
+    structure(analysis, &services, &c, &mut out);
+    if let Some(history) = &analysis.history {
+        history_section(history, &c, &mut out);
+    }
+    out.join("\n")
+}
+
+/// Headline first. Services, structure, edges and findings belong to the
+/// repository report and are not repeated; the runtime mapping is, because
+/// a partial join changes the radius.
+pub fn format_change_report(analysis: &Analysis, color: bool) -> String {
+    let c = Paint { color };
+    let services = analysis.graph.services();
+    let mut out: Vec<String> = Vec::new();
+    header(analysis, &services, &c, &mut out);
+    if let Some(b) = &analysis.blast {
+        blast_section(b, &c, &mut out);
+    }
+    if analysis.runtime.connected {
+        runtime_section(analysis, &c, &mut out);
+    }
+    if let Some(history) = &analysis.history {
+        history_section(history, &c, &mut out);
+    }
+    out.join("\n")
+}
+
+/// Banner, the header rows, and the honest message when discovery found no
+/// service boundaries.
+fn header(analysis: &Analysis, services: &[Service], c: &Paint, out: &mut Vec<String>) {
     let code: Vec<&Service> = services
         .iter()
         .filter(|s| s.role == ServiceRole::Code)
@@ -47,8 +118,6 @@ pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
         .iter()
         .filter(|s| s.role == ServiceRole::Infrastructure)
         .collect();
-    let mut out: Vec<String> = Vec::new();
-
     out.push(c.bold("VERNIER"));
     out.push(String::new());
     out.push(row("Repository", &analysis.repository));
@@ -61,7 +130,10 @@ pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
         None => format!("{} detected", code.len()),
     };
     out.push(row("Services", &detected));
-    out.push(row("Runtime", &runtime_header(analysis, &c)));
+    out.push(row("Runtime", &runtime_header(analysis, c)));
+    if let Some(b) = &analysis.blast {
+        change_rows(b, c, out);
+    }
     out.push(String::new());
 
     if analysis.discovery.strategy.is_none() {
@@ -92,31 +164,49 @@ pub fn format_repo_report(analysis: &Analysis, color: bool) -> String {
         out.push(row("Tried", &c.dim(&tried)));
         out.push(String::new());
     }
+}
 
-    if !services.is_empty() {
-        out.push(c.bold("SERVICES"));
-        out.push(String::new());
-        out.extend(table(&services, &c));
-        out.push(String::new());
-        if !infra.is_empty() {
-            let names = infra
-                .iter()
-                .map(|s| s.name.as_str())
-                .collect::<Vec<_>>()
-                .join(", ");
-            out.push(format!(
-                "  {}",
-                c.dim(&format!(
-                    "{} declared but not built here (images): {names}",
-                    infra.len()
-                ))
-            ));
-            out.push(String::new());
-        }
+/// `Change  PR #481  merge commit 7d13248  2026-09-09`, the title under it,
+/// then how many files landed in how many services.
+fn change_rows(b: &Blast, c: &Paint, out: &mut Vec<String>) {
+    let ch = &b.change;
+    let mut first: Vec<String> = match ch.kind {
+        ChangeKind::Pr => vec![format!("PR {}", ch.reference)],
+        ChangeKind::Commit => vec![format!("commit {}", ch.reference)],
+        ChangeKind::Diff => vec![format!("diff {}", ch.reference)],
+        ChangeKind::Files => vec![format!("{} given", ch.reference)],
+    };
+    if let Some(how) = &ch.how {
+        first.push(how.clone());
     }
-
-    structure(analysis, &services, &c, &mut out);
-    out.join("\n")
+    if let Some(date) = &ch.date {
+        first.push(date.clone());
+    }
+    out.push(row("Change", &first.join("  ")));
+    if let Some(title) = &ch.title {
+        out.push(row("", &c.dim(title)));
+    }
+    let files = ch.files.len();
+    let file_noun = if files == 1 { "file" } else { "files" };
+    let service_noun = if b.changed.len() == 1 {
+        "service"
+    } else {
+        "services"
+    };
+    let mut summary = vec![format!(
+        "{files} {file_noun} in {} {service_noun}",
+        b.changed.len()
+    )];
+    if !b.unowned.is_empty() {
+        summary.push(format!("{} in no service", b.unowned.len()));
+    }
+    if ch.outside_root > 0 {
+        summary.push(format!(
+            "{} outside the analysed directory",
+            ch.outside_root
+        ));
+    }
+    out.push(row("", &c.dim(&summary.join(", "))));
 }
 
 fn row(label: &str, value: &str) -> String {
@@ -236,7 +326,8 @@ fn structure(analysis: &Analysis, services: &[Service], c: &Paint, out: &mut Vec
     out.push(String::new());
     out.extend(edges_table(edges, c));
     out.push(String::new());
-    findings(edges, services, c, out, analysis.runtime.connected);
+    let widest = blast::widest(&analysis.graph, blast::DEFAULT_DEPTH);
+    findings(edges, services, c, out, analysis.runtime.connected, widest);
 }
 
 fn structure_counts(edges: &[Edge], out: &mut Vec<String>) {
@@ -436,12 +527,14 @@ fn runtime_section(analysis: &Analysis, c: &Paint, out: &mut Vec<String>) {
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn findings(
     edges: &[Edge],
     services: &[Service],
     c: &Paint,
     out: &mut Vec<String>,
     runtime_connected: bool,
+    widest: Option<(String, usize)>,
 ) {
     out.push(c.bold("FINDINGS"));
     out.push(String::new());
@@ -489,6 +582,24 @@ fn findings(
             "    {}",
             c.dim(&format!("touched by {} {noun}", sources.len()))
         ));
+    }
+    out.push(String::new());
+    match widest {
+        Some((name, count)) if count > 0 => {
+            out.push(format!("  {:<38} {name}", "Widest change surface"));
+            let noun = if count == 1 { "service" } else { "services" };
+            out.push(format!(
+                "    {}",
+                c.dim(&format!("a change here reaches {count} {noun}"))
+            ));
+        }
+        _ => {
+            out.push(format!("  {:<38} -", "Widest change surface"));
+            out.push(format!(
+                "    {}",
+                c.dim("no change to one service reaches another")
+            ));
+        }
     }
     out.push(String::new());
     // One line per pair of code services that read the same database, under
@@ -571,6 +682,330 @@ fn never_observed_finding(
     ));
     if !never.is_empty() {
         out.push(format!("    {}", c.dim(&wrap(&never.join(", "), 60))));
+    }
+}
+
+/// BLAST RADIUS: the headline, what changed, what it reaches and how, and
+/// what it does not reach, in the fixed wording.
+fn blast_section(b: &Blast, c: &Paint, out: &mut Vec<String>) {
+    out.push(c.bold("BLAST RADIUS"));
+    out.push(String::new());
+    let changed_noun = if b.summary.changed == 1 {
+        "service"
+    } else {
+        "services"
+    };
+    let reached_noun = if b.summary.reached == 1 {
+        "service"
+    } else {
+        "services"
+    };
+    out.push(format!(
+        "  {}",
+        c.bold(&format!(
+            "{} {changed_noun} changed -> {} {reached_noun} in the blast radius",
+            b.summary.changed, b.summary.reached
+        ))
+    ));
+    let by = b.summary.by_confidence;
+    let mut parts: Vec<String> = Vec::new();
+    for (n, label) in [
+        (by.observed, "observed"),
+        (by.static_, "static"),
+        (by.inferred, "inferred"),
+        (by.uncertain, "uncertain"),
+    ] {
+        if n > 0 {
+            parts.push(format!("{n} {label}"));
+        }
+    }
+    parts.push(format!("depth {}", b.depth));
+    out.push(format!("  {}", c.dim(&parts.join(" · "))));
+    out.push(String::new());
+
+    changed_block(b, c, out);
+
+    if !b.reached.is_empty() {
+        out.push(format!("  {}", c.dim("REACHED")));
+        out.extend(reached_table(&b.reached, c));
+        out.push(String::new());
+    }
+
+    if !b.infrastructure.is_empty() {
+        let list = b
+            .infrastructure
+            .iter()
+            .map(|t| format!("{} (published to by {})", t.service, t.via))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.push(format!(
+            "  {:<28} {}",
+            "Infrastructure on the path",
+            c.dim(&list)
+        ));
+        out.push(format!(
+            "  {}",
+            c.dim("  every other client of a broker a changed service publishes to is included as uncertain")
+        ));
+        out.push(String::new());
+    }
+
+    if !b.unowned.is_empty() && !b.changed.is_empty() {
+        let noun = if b.unowned.len() == 1 {
+            "file belongs"
+        } else {
+            "files belong"
+        };
+        out.push(format!(
+            "  {}",
+            c.dim(&format!(
+                "{} changed {noun} to no service: {}",
+                b.unowned.len(),
+                wrap(&b.unowned.join(", "), 60)
+            ))
+        ));
+        out.push(String::new());
+    }
+
+    not_reached_block(b, c, out);
+}
+
+/// What changed, or the honest line when nothing the change touched belongs
+/// to a service.
+fn changed_block(b: &Blast, c: &Paint, out: &mut Vec<String>) {
+    if b.changed.is_empty() {
+        let noun = if b.change.files.len() == 1 {
+            "file belongs"
+        } else {
+            "files belong"
+        };
+        out.push(format!(
+            "  {}",
+            c.yellow(&format!(
+                "None of the {} changed {noun} to a discovered service: {}",
+                b.change.files.len(),
+                wrap(&b.unowned.join(", "), 60)
+            ))
+        ));
+        if b.change.files.is_empty() {
+            out.push(format!("  {}", c.yellow("The change lists no files.")));
+        }
+        out.push(String::new());
+        return;
+    }
+    out.push(format!("  {}", c.dim("CHANGED")));
+    let w_name = b
+        .changed
+        .iter()
+        .map(|x| x.service.chars().count())
+        .max()
+        .unwrap_or(7)
+        .max(7);
+    for ch in &b.changed {
+        let noun = if ch.files.len() == 1 { "file" } else { "files" };
+        let shown: Vec<&str> = ch.files.iter().take(3).map(String::as_str).collect();
+        let more = if ch.files.len() > 3 { ", ..." } else { "" };
+        out.push(format!(
+            "  {:<w_name$}  {:>3} {noun:<5}  {}",
+            ch.service,
+            ch.files.len(),
+            c.dim(&format!("{}{more}", shown.join(", ")))
+        ));
+    }
+    out.push(String::new());
+}
+
+/// The fixed wording, then the services it applies to.
+fn not_reached_block(b: &Blast, c: &Paint, out: &mut Vec<String>) {
+    out.push(format!("  {}", blast::NOT_REACHED));
+    if b.not_reached.is_empty() {
+        out.push(format!(
+            "    {}",
+            c.dim("0 services  (every other service is in the computed blast radius)")
+        ));
+    } else {
+        let noun = if b.not_reached.len() == 1 {
+            "service"
+        } else {
+            "services"
+        };
+        out.push(format!(
+            "    {:<11} {}",
+            format!("{} {noun}", b.not_reached.len()),
+            c.dim(&wrap(&b.not_reached.join(", "), 60))
+        ));
+    }
+}
+
+fn reached_table(reached: &[blast::Reached], c: &Paint) -> Vec<String> {
+    let w_name = reached
+        .iter()
+        .map(|r| r.service.chars().count())
+        .max()
+        .unwrap_or(7)
+        .max(7);
+    let header = format!(
+        "{:<w_name$}  {:<5}  {:<10}  PATH",
+        "SERVICE", "DEPTH", "CONFIDENCE"
+    );
+    let mut lines = vec![format!("  {}", c.dim(&header))];
+    for r in reached {
+        let path = r
+            .path
+            .iter()
+            .rev()
+            .map(hop_words)
+            .collect::<Vec<_>>()
+            .join("; ");
+        let line = format!(
+            "  {:<w_name$}  {:<5}  {:<10}  {path}",
+            r.service,
+            r.depth,
+            r.confidence.as_str()
+        );
+        lines.push(if r.confidence == Confidence::Uncertain {
+            c.dim(&line)
+        } else {
+            line
+        });
+    }
+    lines
+}
+
+/// One hop, read from the reached service's side.
+fn hop_words(h: &Hop) -> String {
+    match h.relation {
+        Relation::Calls => match h.calls {
+            Some(n) => format!(
+                "{} calls {} ({}, {n} calls)",
+                h.to,
+                h.from,
+                h.edge_type.as_str()
+            ),
+            None => format!("{} calls {} ({})", h.to, h.from, h.edge_type.as_str()),
+        },
+        Relation::Imports => format!("{} imports {}", h.to, h.from),
+        Relation::SharesDatabase => format!("{} shares a database with {}", h.to, h.from),
+        Relation::Consumes => match h.calls {
+            Some(n) => format!("{} consumes events from {} ({n} calls)", h.to, h.from),
+            None => format!("{} consumes events from {}", h.to, h.from),
+        },
+        Relation::SharesBroker => format!(
+            "{} shares broker {} with {}",
+            h.to,
+            h.via.as_deref().unwrap_or("?"),
+            h.from
+        ),
+    }
+}
+
+/// CHANGE HISTORY: the numbers over the last N pull requests, or commits
+/// when the history carries no pull request markers.
+fn history_section(h: &History, c: &Paint, out: &mut Vec<String>) {
+    out.push(String::new());
+    let scope = if h.found < h.requested {
+        format!(
+            "(last {} {}, {} asked for)",
+            h.found,
+            h.unit.noun(h.found),
+            h.requested
+        )
+    } else {
+        format!("(last {} {})", h.found, h.unit.noun(h.found))
+    };
+    out.push(format!("{}  {}", c.bold("CHANGE HISTORY"), c.dim(&scope)));
+    out.push(String::new());
+    if h.unit == Unit::Commits {
+        out.push(format!(
+            "  {}",
+            c.yellow(
+                "No pull request markers in the history; each first-parent commit counts as one change."
+            )
+        ));
+        out.push(String::new());
+    }
+    if h.found == 0 {
+        out.push(format!("  {}", c.yellow("No commits found.")));
+        return;
+    }
+    let noun = if (h.average - 1.0).abs() < f64::EPSILON {
+        "service"
+    } else {
+        "services"
+    };
+    out.push(wide_row(
+        "Average blast radius",
+        &format!("{:.1} {noun}", h.average),
+    ));
+    out.push(wide_row("Median", &format_number(h.median)));
+    if let Some(largest) = &h.largest {
+        let label = match h.unit {
+            Unit::PullRequests => format!("PR {}", largest.reference),
+            Unit::Commits => format!("commit {}", largest.reference),
+        };
+        let noun = if largest.reached == 1 {
+            "service"
+        } else {
+            "services"
+        };
+        out.push(wide_row(
+            "Largest",
+            &format!("{label} - {} {noun}", largest.reached),
+        ));
+    }
+    let unit_noun = match h.unit {
+        Unit::PullRequests => "PRs",
+        Unit::Commits => "Commits",
+    };
+    out.push(wide_row(
+        &format!("{unit_noun} reaching >10"),
+        &format!(
+            "{}  {}",
+            h.over_10.count,
+            c.dim(&format!("({}%)", h.over_10.percent))
+        ),
+    ));
+    if h.touching_no_service > 0 {
+        out.push(wide_row(
+            &format!("{unit_noun} touching no service"),
+            &h.touching_no_service.to_string(),
+        ));
+    }
+    out.push(String::new());
+    let w_ref = h
+        .entries
+        .iter()
+        .map(|e| e.reference.chars().count())
+        .max()
+        .unwrap_or(3)
+        .max(3);
+    out.push(format!(
+        "  {}",
+        c.dim(&format!(
+            "{:<w_ref$}  {:<10}  {:>5}  {:>7}  {:>7}  TITLE",
+            "REF", "DATE", "FILES", "CHANGED", "REACHED"
+        ))
+    ));
+    for e in &h.entries {
+        let title: String = e.title.chars().take(60).collect();
+        out.push(format!(
+            "  {:<w_ref$}  {:<10}  {:>5}  {:>7}  {:>7}  {}",
+            e.reference,
+            e.date,
+            e.files,
+            e.changed,
+            e.reached,
+            c.dim(&title)
+        ));
+    }
+}
+
+/// `3` for a whole number, `3.5` otherwise.
+fn format_number(x: f64) -> String {
+    if x.fract().abs() < f64::EPSILON {
+        format!("{x:.0}")
+    } else {
+        format!("{x:.1}")
     }
 }
 

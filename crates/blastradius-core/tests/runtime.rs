@@ -454,6 +454,8 @@ fn never_observed_leaves_out_shared_databases_and_imports_and_ignores_do_not_war
             }),
             warnings: vec![],
         },
+        blast: None,
+        history: None,
     };
     let r = format_repo_report(&analysis, false);
     assert!(
