@@ -285,3 +285,40 @@ same calls.
 Forge APIs (`gh`, GitLab), `--pr` for an unfetched pull request, weighting
 by call frequency, per-file ownership finer than a directory, a "last
 observed" date on static edges, publishing the npm package.
+
+## Decisions made while building
+
+- `ChangeKind` gained `Commit` for a history without pull request markers,
+  so an entry's kind says what it is rather than borrowing `diff`.
+- `History` holds `f64` for the average and median, so `AnalysisJson` derives
+  `PartialEq` but no longer `Eq`. Nothing needed `Eq`.
+- `widest()` breaks a tie on the first name in service order; in the unit
+  graph `dispatch` and `payment` both reach seven services and `dispatch` is
+  reported. A finding that flips between runs would be worse than one that
+  picks a side.
+- The walk runs on the graph at `HEAD`, also for older pull requests in
+  `--history`. Re-analysing the tree at each merge commit would need a
+  checkout per entry; the report says which graph it used. The test
+  repositories append to files rather than overwrite them, because
+  overwriting `web/default.conf.template` silently removed web's edges and
+  the history numbers changed for a reason that had nothing to do with git.
+- `--diff` splits its value on whitespace, so `HEAD~3 HEAD~1` works as well
+  as `main...HEAD`.
+- `--files` is greedy (`num_args = 1..`); the repository path goes before it.
+- The change report repeats the RUNTIME section when a source was joined,
+  because a partial join changes the radius and the reader should see the
+  mapping next to the result. It does not repeat SERVICES, STRUCTURE, EDGES
+  or FINDINGS.
+- `--html` reports the written path on stderr, so stdout stays the report or
+  the JSON.
+- The HTML page computes its findings in the browser from the embedded
+  contract, with the same rules as the terminal: the shared-database finding
+  reads the `shared database <key> with ...` evidence detail rather than
+  counting every database edge, which on robot-shop would have said 4 where
+  the terminal says 0. The widest-change-surface value travels with the data
+  because it needs the walk.
+- The HTML layout uses a seeded generator so the same graph draws the same
+  picture; positions are not stored in the contract.
+- Chrome's extension could not open the generated file during the build; the
+  page was checked with headless Chrome instead: the script runs to the end,
+  the panel and headline are filled and every node and edge is drawn.

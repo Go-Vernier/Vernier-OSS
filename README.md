@@ -26,17 +26,18 @@ boundaries in about 100 ms each, without configuration:
 
 ## Status
 
-Phase 0, week 2. This is the open-source CLI described in
-[docs/build-spec.md](docs/build-spec.md). Service discovery, static
-dependency mapping and the runtime join are built. The rest is not, and the
-report says so instead of guessing.
+Phase 0. This is the open-source CLI described in
+[docs/build-spec.md](docs/build-spec.md). All four stages are built: service
+discovery, static dependency mapping, the runtime join, and the blast radius
+of a change with its reports. Where the tool cannot answer, the report says
+so instead of guessing.
 
 | Stage | What it does | State |
 | --- | --- | --- |
 | 1. Discover | Find service boundaries: docker-compose, Kubernetes, monorepo layout, workspace config | Built |
 | 2. Map | Static edges: HTTP calls, gRPC stubs, message topics and typed events, shared databases, cross-package imports; datastore and broker hosts found on the way | Built |
 | 3. Join | Optional runtime edges from OpenTelemetry (servicegraph scrape or OTLP JSON) or Datadog, with an explicit name-matching report | Built |
-| 4. Report | Blast radius of a change, one PR, or the last N PRs; terminal and self-contained HTML | Planned |
+| 4. Report | Blast radius of a change: files, a git diff range, or a pull request in the local history; the last N pull requests; terminal and self-contained HTML | Built |
 
 Not yet published. Run it from source with a stable Rust toolchain:
 
@@ -48,7 +49,16 @@ cargo build --release
 ./target/release/vernier analyze /path/to/a/repository --json
 ./target/release/vernier analyze /path/to/a/repository --otel traces.prom     # servicegraph scrape or OTLP JSON
 ./target/release/vernier analyze /path/to/a/repository --datadog deps.json    # saved service_dependencies response
+./target/release/vernier analyze /path/to/a/repository --pr 481               # one pull request, from the local git history
+./target/release/vernier analyze /path/to/a/repository --diff main...HEAD     # any git diff range
+./target/release/vernier analyze /path/to/a/repository --files a/b.js c/d.py  # explicit files
+./target/release/vernier analyze /path/to/a/repository --history 50           # the last 50 pull requests
+./target/release/vernier analyze /path/to/a/repository --html report.html     # the self-contained HTML report
 ```
+
+`--pr`, `--diff` and `--files` take one change at a time; `--history` adds a
+section to either report; `--depth` (default 3) bounds the walk; `--otel` and
+`--datadog` combine with all of them, so observed edges take part in the walk.
 
 The engine is Rust. An npm package will wrap the binary when it is
 published, so it will install as `vernier` and run as `npx vernier analyze .`.
@@ -116,6 +126,9 @@ FINDINGS
   Most connected                         cart
     touched by 3 services
 
+  Widest change surface                  mongodb
+    a change here reaches 8 services
+
   Shared databases                       0
 ```
 
@@ -125,6 +138,50 @@ the tool is: `dispatch`'s edge to `rabbitmq` comes from an import of the AMQP
 client library joined to the broker image declared in compose, so it is
 Inferred rather than Static; the cart service's `REDIS_HOST` default is a
 literal, so that one is Static.
+
+## What a change looks like
+
+```
+$ vernier analyze corpus/robot-shop --files cart/server.js
+
+VERNIER
+
+  Repository    instana/robot-shop
+  Services      11 detected  (docker-compose)
+  Runtime       not connected - static only
+  Change        1 file given
+                1 file in 1 service
+
+BLAST RADIUS
+
+  1 service changed -> 4 services in the blast radius
+  2 static · 1 inferred · 1 uncertain · depth 3
+
+  CHANGED
+  cart       1 file   cart/server.js
+
+  REACHED
+  SERVICE   DEPTH  CONFIDENCE  PATH
+  payment   1      static      payment calls cart (http)
+  shipping  1      static      shipping calls cart (http)
+  web       1      uncertain   web calls cart (http)
+  dispatch  2      inferred    dispatch consumes events from payment; payment calls cart (http)
+
+  Not in the computed blast radius - no static or observed runtime path found
+    6 services  catalogue, load, mongodb, mysql, ratings, user
+```
+
+The headline counts the services a change reaches, not the ones it touches.
+Each reached service shows the depth it was reached at, the weakest
+confidence on the path, and the path itself, read from that service back to
+the change. The last block uses the only wording the tool has for the rest:
+it never says a service cannot be affected.
+
+With `--pr 481` the `Change` row names the pull request, the commit that
+merged it and its date; with `--history 50` a CHANGE HISTORY section gives
+the average, median and largest blast radius over the last fifty pull
+requests and how many reached more than ten services, with one row per pull
+request under it.
 
 ## How discovery works
 
@@ -265,9 +322,55 @@ FINDINGS
     orders -> rabbitmq
 ```
 
+## How the blast radius works
+
+A change is a set of files. `--files` lists them; `--diff RANGE` asks git
+(`git diff --name-only RANGE`, verbatim); `--pr N` finds the pull request in
+the local history: a first-parent commit on `HEAD` whose subject carries the
+number (`Merge pull request #N ...`, a squash-merge `(#N)`, Bitbucket's
+`(pull request #N)`) or a ref such as `refs/pull/N/head`. The tool never
+calls a forge API; when the pull request is not there, the error says how to
+fetch it. When the analysed directory is a subdirectory of the repository,
+paths are made relative to it and files outside it are counted.
+
+Each file belongs to the service whose root holds it; the longest root wins,
+and a file under no root is listed as unowned and seeds nothing. The changed
+services seed a walk that follows these edges, to `--depth` hops (default 3):
+
+| From changed or reached service N | Reaches | Because |
+| --- | --- | --- |
+| inbound `http` or `grpc` edge `S -> N` | S | S calls N |
+| inbound `import` edge `S -> N` | S | S imports N |
+| inbound `database` edge `S -> N` (a shared database) | S | S shares a database with N |
+| outbound `event` edge `N -> T`, T a service | T | T consumes events from N |
+| outbound `event` edge `N -> B`, B a broker, N a *changed* service | every other client of B | they share the broker; the topic is unknown, so Uncertain |
+
+Not followed: what N itself depends on (its own outbound `http`, `grpc`,
+`import` and `database` edges are not affected by a change to N), a
+consumer's producer (inbound `event`), and the broker step from a service
+that was reached rather than changed, because that step carries no topic
+evidence and chaining it would join the whole repository through one broker.
+Brokers on the path are listed, not counted.
+
+A reached service's confidence is the weakest hop on its path; when several
+paths reach it, the strongest wins and, among equally strong ones, the
+shortest. The walk runs on the graph as it is at `HEAD`, also for older pull
+requests in `--history`.
+
+`--history N` takes the last N pull requests from the first-parent history
+and runs the walk for each. When the history carries no pull request markers
+at all, the last N commits are used and the section says so.
+
+`--html report.html` writes one file with no external resource: the graph
+drawn with nodes sized by inbound edges and coloured by confidence,
+infrastructure hollow, uncertain edges dashed; when a change was analysed the
+changed services are ringed and everything outside the radius is dimmed.
+Clicking a node lists its edges and their evidence. `--json` includes the
+`blast` and `history` blocks, present only when asked for.
+
 ## The confidence model
 
-Every edge will carry one of four labels. The weakest label on a path decides
+Every edge carries one of four labels. The weakest label on a path decides
 the label of everything reached through it.
 
 | Label | Meaning |
@@ -294,6 +397,7 @@ cargo test                                # fixtures under test/fixtures, parity
 cargo fmt --check && cargo clippy --all-targets -- -D warnings
 sh scripts/corpus.sh                      # shallow-clone the eight reference repositories into corpus/
 cargo test --test corpus -- --nocapture   # discovery counts and timing on the corpus
+cargo run -q -- analyze corpus/robot-shop --files cart/server.js --html /tmp/robot-shop.html
 ```
 
 Every change should run against the whole corpus. A regression on one repo
@@ -305,10 +409,12 @@ must reproduce.
 The `blastradius-core` crate is also a library:
 
 ```rust
-use blastradius::{analyze, format_repo_report};
+use blastradius::{analyze, blast, format_report, Change};
 
-let analysis = analyze(std::path::Path::new("./my-repo"))?;
-println!("{}", format_repo_report(&analysis, false));
+let mut analysis = analyze(std::path::Path::new("./my-repo"))?;
+let change = Change::from_files(&["services/checkout/src/pay.ts".to_string()]);
+analysis.blast = Some(blast::of_change(&analysis.graph, change, blast::DEFAULT_DEPTH));
+println!("{}", format_report(&analysis, false));
 ```
 
 ## Part of Vernier
