@@ -207,3 +207,209 @@ fn runtime_errors_exit_1_and_print_no_report() {
         String::from_utf8_lossy(&no_keys.stderr)
     );
 }
+
+// ---------------------------------------------------------------- stage 4
+
+fn temp_dir(tag: &str) -> PathBuf {
+    let root = std::env::temp_dir().join(format!("vernier-cli-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).unwrap();
+    root
+}
+
+fn git(root: &std::path::Path, args: &[&str]) {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(root)
+        .args([
+            "-c",
+            "user.name=vernier",
+            "-c",
+            "user.email=vernier@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for entry in std::fs::read_dir(from).unwrap().flatten() {
+        let target = to.join(entry.file_name());
+        if entry.file_type().unwrap().is_dir() {
+            copy_dir(&entry.path(), &target);
+        } else {
+            std::fs::copy(entry.path(), target).unwrap();
+        }
+    }
+}
+
+/// `edges-http-app` with two commits: everything, then a squash-merged PR #8
+/// touching catalogue.
+fn repo(tag: &str) -> PathBuf {
+    let root = temp_dir(tag);
+    copy_dir(&fixture("edges-http-app"), &root);
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "initial"]);
+    std::fs::write(root.join("catalogue/handlers.go"), "package main\n").unwrap();
+    git(&root, &["add", "-A"]);
+    git(&root, &["commit", "-q", "-m", "catalogue: handler (#8)"]);
+    root
+}
+
+#[test]
+fn files_flag_prints_the_change_report_and_json() {
+    let out = bin()
+        .args([
+            "analyze",
+            fixture("edges-http-app").to_str().unwrap(),
+            "--files",
+            "catalogue/main.go",
+            "README.md",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("BLAST RADIUS"), "{text}");
+    assert!(
+        text.contains("1 service changed -> 4 services in the blast radius"),
+        "{text}"
+    );
+    assert!(text.contains("Not in the computed blast radius"), "{text}");
+
+    let out = bin()
+        .args([
+            "analyze",
+            fixture("edges-http-app").to_str().unwrap(),
+            "--files",
+            "catalogue/main.go",
+            "--depth",
+            "1",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["blast"]["depth"], 1);
+    assert_eq!(json["blast"]["summary"]["reached"], 3);
+    assert_eq!(json["blast"]["notReached"], serde_json::json!(["payment"]));
+}
+
+#[test]
+fn pr_diff_and_history_flags_read_the_local_repository() {
+    let root = repo("pr");
+    let out = bin()
+        .args(["analyze", root.to_str().unwrap(), "--pr", "8", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["blast"]["change"]["kind"], "pr");
+    assert_eq!(json["blast"]["change"]["reference"], "#8");
+    assert_eq!(
+        json["blast"]["change"]["files"],
+        serde_json::json!(["catalogue/handlers.go"])
+    );
+    assert_eq!(json["blast"]["summary"]["reached"], 4);
+
+    let out = bin()
+        .args([
+            "analyze",
+            root.to_str().unwrap(),
+            "--diff",
+            "HEAD~1",
+            "--history",
+            "5",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("Change        diff HEAD~1"), "{text}");
+    assert!(
+        text.contains("CHANGE HISTORY  (last 1 PR, 5 asked for)"),
+        "{text}"
+    );
+
+    let missing = bin()
+        .args(["analyze", root.to_str().unwrap(), "--pr", "404"])
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&missing.stderr);
+    assert!(
+        err.contains("pull request #404 is not in the local history"),
+        "{err}"
+    );
+    assert!(err.contains("git fetch origin pull/404/head"), "{err}");
+    assert!(missing.stdout.is_empty());
+
+    let both = bin()
+        .args([
+            "analyze",
+            root.to_str().unwrap(),
+            "--pr",
+            "8",
+            "--files",
+            "a",
+        ])
+        .output()
+        .unwrap();
+    assert_eq!(both.status.code(), Some(2), "clap rejects the conflict");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[test]
+fn html_flag_writes_a_self_contained_file_and_still_prints_the_report() {
+    let dir = temp_dir("html");
+    let file = dir.join("report.html");
+    let out = bin()
+        .args([
+            "analyze",
+            fixture("edges-http-app").to_str().unwrap(),
+            "--files",
+            "catalogue/main.go",
+            "--html",
+            file.to_str().unwrap(),
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(String::from_utf8_lossy(&out.stdout).contains("BLAST RADIUS"));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("wrote"));
+    let html = std::fs::read_to_string(&file).unwrap();
+    assert!(html.contains(r#"<script id="vernier-data""#));
+    assert!(html.contains("\"blast\":{"));
+    assert!(!html.contains("src=\"http"));
+    std::fs::remove_dir_all(&dir).unwrap();
+}
