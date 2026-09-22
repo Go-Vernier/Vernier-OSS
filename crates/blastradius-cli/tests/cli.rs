@@ -413,3 +413,27 @@ fn html_flag_writes_a_self_contained_file_and_still_prints_the_report() {
     assert!(!html.contains("src=\"http"));
     std::fs::remove_dir_all(&dir).unwrap();
 }
+
+#[test]
+fn tui_refuses_to_start_without_a_terminal() {
+    let out = bin()
+        .args(["tui", fixture("edges-http-app").to_str().unwrap()])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(out.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        "vernier: tui needs a terminal; use vernier analyze for a report\n"
+    );
+}
+
+#[test]
+fn tui_shares_the_change_flags_with_analyze() {
+    let out = bin()
+        .args(["tui", ".", "--pr", "1", "--diff", "HEAD~1"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(2));
+    assert!(String::from_utf8_lossy(&out.stderr).contains("cannot be used with"));
+}
