@@ -15,7 +15,7 @@ the terminal report words them.
 
 `vernier tui [PATH]` is a new subcommand in the same binary. It is built with
 ratatui 0.30 and the crossterm 0.29 ratatui re-exports, in a new library
-crate, `crates/blastradius-tui`. The engine crate takes no new dependency.
+crate, `crates/vernier-tui`. The engine crate takes no new dependency.
 
 ## CLI
 
@@ -117,7 +117,7 @@ selection.
 ## Architecture
 
 ```
-crates/blastradius-tui/src/
+crates/vernier-tui/src/
   lib.rs      run(analysis, options) -> Result<()>: terminal setup, loop, restore
   app.rs      App state and update(Key) -> Action; no terminal, no I/O
   ui/         one render function per tab and the header; pure over &App

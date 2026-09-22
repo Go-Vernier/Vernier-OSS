@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `blast-radius analyze . --otel <file|url>` and `--datadog [<file|url>]` read what production actually calls, match runtime service names to discovered services with the result always printed, and merge: static edges production confirmed become `Observed` with their call counts, calls static analysis missed become new `Observed` edges, and no static edge is ever dropped.
+**Goal:** `vernier analyze . --otel <file|url>` and `--datadog [<file|url>]` read what production actually calls, match runtime service names to discovered services with the result always printed, and merge: static edges production confirmed become `Observed` with their call counts, calls static analysis missed become new `Observed` edges, and no static edge is ever dropped.
 
-**Architecture:** A new `runtime` module in `blastradius-core` with one parser per source (`prometheus.rs`, `otlp.rs`, `datadog.rs`) all producing the same `RuntimeGraph`; a `fetch.rs` that reads a file or, only when asked, a URL; `matching.rs` resolving each runtime name through config, exact, normalised and fuzzy tiers; `merge.rs` applying the build spec's merge rules to the existing `BlastGraph`. `analyze()` is unchanged; the CLI calls `runtime::load` and `runtime::join` after it. The JSON contract grows additively (`edge.observed`, a fuller `runtime` block).
+**Architecture:** A new `runtime` module in `vernier-core` with one parser per source (`prometheus.rs`, `otlp.rs`, `datadog.rs`) all producing the same `RuntimeGraph`; a `fetch.rs` that reads a file or, only when asked, a URL; `matching.rs` resolving each runtime name through config, exact, normalised and fuzzy tiers; `merge.rs` applying the build spec's merge rules to the existing `BlastGraph`. `analyze()` is unchanged; the CLI calls `runtime::load` and `runtime::join` after it. The JSON contract grows additively (`edge.observed`, a fuller `runtime` block).
 
 **Tech Stack:** Rust 1.98 stable via Homebrew rustup; existing serde, serde_json, indexmap, regex, thiserror, clap; new `ureq = "3"` (HTTP, rustls) and `strsim = "0.11"` (Jaro–Winkler).
 
@@ -27,25 +27,25 @@
 
 ```
 Cargo.toml                                          + ureq, strsim in [workspace.dependencies]
-crates/blastradius-core/Cargo.toml                  + ureq.workspace, strsim.workspace
-crates/blastradius-core/src/model.rs                + RuntimeSource, Observed; Edge.observed
-crates/blastradius-core/src/analyze.rs              Runtime block: connected, source, input, services, mapping, unmatched, edges, warnings
-crates/blastradius-core/src/graph.rs                + edges_mut(), sort_edges()
-crates/blastradius-core/src/config.rs               NEW  blast-radius.config.json: Config { runtime: RuntimeConfig { map, ignore } }
-crates/blastradius-core/src/runtime/mod.rs          NEW  RuntimeKind, RuntimeCall, RuntimeGraph, RuntimeInput, RuntimeError; detect(), load(), join()
-crates/blastradius-core/src/runtime/prometheus.rs   NEW  servicegraph text format
-crates/blastradius-core/src/runtime/otlp.rs         NEW  OTLP JSON spans
-crates/blastradius-core/src/runtime/datadog.rs      NEW  service_dependencies JSON; url()
-crates/blastradius-core/src/runtime/fetch.rs        NEW  read(), http_get(), datadog_live()
-crates/blastradius-core/src/runtime/matching.rs     NEW  MatchHow, Mapping, match_names()
-crates/blastradius-core/src/runtime/merge.rs        NEW  MergeCounts, apply()
-crates/blastradius-core/src/lib.rs                  + pub mod config; pub mod runtime; re-exports
-crates/blastradius-core/src/report.rs               header, RUNTIME section, FINDINGS line
-crates/blastradius-core/tests/runtime.rs            NEW  integration tests on the fixture
-crates/blastradius-core/tests/edges.rs              contract test extended
-crates/blastradius-cli/src/main.rs                  --otel, --datadog, --dd-env, --dd-site
-crates/blastradius-cli/tests/cli.rs                 + runtime flag tests and error paths
-test/fixtures/runtime-app/                          compose + 5 services + blast-radius.config.json + runtime/{traces.prom,spans.json,datadog.json}
+crates/vernier-core/Cargo.toml                  + ureq.workspace, strsim.workspace
+crates/vernier-core/src/model.rs                + RuntimeSource, Observed; Edge.observed
+crates/vernier-core/src/analyze.rs              Runtime block: connected, source, input, services, mapping, unmatched, edges, warnings
+crates/vernier-core/src/graph.rs                + edges_mut(), sort_edges()
+crates/vernier-core/src/config.rs               NEW  vernier.config.json: Config { runtime: RuntimeConfig { map, ignore } }
+crates/vernier-core/src/runtime/mod.rs          NEW  RuntimeKind, RuntimeCall, RuntimeGraph, RuntimeInput, RuntimeError; detect(), load(), join()
+crates/vernier-core/src/runtime/prometheus.rs   NEW  servicegraph text format
+crates/vernier-core/src/runtime/otlp.rs         NEW  OTLP JSON spans
+crates/vernier-core/src/runtime/datadog.rs      NEW  service_dependencies JSON; url()
+crates/vernier-core/src/runtime/fetch.rs        NEW  read(), http_get(), datadog_live()
+crates/vernier-core/src/runtime/matching.rs     NEW  MatchHow, Mapping, match_names()
+crates/vernier-core/src/runtime/merge.rs        NEW  MergeCounts, apply()
+crates/vernier-core/src/lib.rs                  + pub mod config; pub mod runtime; re-exports
+crates/vernier-core/src/report.rs               header, RUNTIME section, FINDINGS line
+crates/vernier-core/tests/runtime.rs            NEW  integration tests on the fixture
+crates/vernier-core/tests/edges.rs              contract test extended
+crates/vernier-cli/src/main.rs                  --otel, --datadog, --dd-env, --dd-site
+crates/vernier-cli/tests/cli.rs                 + runtime flag tests and error paths
+test/fixtures/runtime-app/                          compose + 5 services + vernier.config.json + runtime/{traces.prom,spans.json,datadog.json}
 README.md, docs/superpowers/specs/2026-09-09-runtime-join-design.md
 ```
 
@@ -54,11 +54,11 @@ README.md, docs/superpowers/specs/2026-09-09-runtime-join-design.md
 ### Task 1: Contract: `Observed` on edges and the fuller `runtime` block
 
 **Files:**
-- Modify: `crates/blastradius-core/src/model.rs`
-- Modify: `crates/blastradius-core/src/analyze.rs`
-- Modify: `crates/blastradius-core/src/map/mod.rs` (the `Edge { .. }` literal in `collect_outcomes` gains `observed: None`)
-- Modify: `crates/blastradius-core/tests/analyze.rs` (the `edge()` helper gains `observed: None`), `crates/blastradius-core/tests/edges.rs`
-- Modify: `crates/blastradius-core/src/lib.rs` (re-exports)
+- Modify: `crates/vernier-core/src/model.rs`
+- Modify: `crates/vernier-core/src/analyze.rs`
+- Modify: `crates/vernier-core/src/map/mod.rs` (the `Edge { .. }` literal in `collect_outcomes` gains `observed: None`)
+- Modify: `crates/vernier-core/tests/analyze.rs` (the `edge()` helper gains `observed: None`), `crates/vernier-core/tests/edges.rs`
+- Modify: `crates/vernier-core/src/lib.rs` (re-exports)
 
 **Interfaces:**
 - Produces:
@@ -166,11 +166,11 @@ fn runtime_block_serialises_only_what_is_known() {
 }
 ```
 
-`tests/analyze.rs` already has `use blastradius::*;`; add `RuntimeEdges, RuntimeMapping, RuntimeServices` to the `pub use analyze::{...}` list in `lib.rs` and `Observed, RuntimeSource` come through `pub use model::*`.
+`tests/analyze.rs` already has `use vernier::*;`; add `RuntimeEdges, RuntimeMapping, RuntimeServices` to the `pub use analyze::{...}` list in `lib.rs` and `Observed, RuntimeSource` come through `pub use model::*`.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core 2>&1 | grep -E 'error\[|FAILED|test result' | head`
+Run: `cargo test -p vernier-core 2>&1 | grep -E 'error\[|FAILED|test result' | head`
 Expected: compile errors (`observed` field, `Observed`, `RuntimeSource`, `RuntimeServices` unknown).
 
 - [ ] **Step 3: Implement**
@@ -240,8 +240,8 @@ git commit -m "feat(model): observed runtime data on edges and a fuller runtime 
 ### Task 2: The runtime module and the Prometheus servicegraph parser
 
 **Files:**
-- Create: `crates/blastradius-core/src/runtime/mod.rs`, `crates/blastradius-core/src/runtime/prometheus.rs`
-- Modify: `crates/blastradius-core/src/lib.rs` (`pub mod runtime;`)
+- Create: `crates/vernier-core/src/runtime/mod.rs`, `crates/vernier-core/src/runtime/prometheus.rs`
+- Modify: `crates/vernier-core/src/lib.rs` (`pub mod runtime;`)
 
 **Interfaces:**
 - Produces:
@@ -371,7 +371,7 @@ up 1
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core --lib runtime 2>&1 | grep -E 'error|test result' | head`
+Run: `cargo test -p vernier-core --lib runtime 2>&1 | grep -E 'error|test result' | head`
 Expected: compile error, module missing.
 
 - [ ] **Step 3: Implement `runtime/mod.rs`**
@@ -563,11 +563,11 @@ Add `pub mod runtime;` to `lib.rs` and `pub use runtime::{RuntimeCall, RuntimeGr
 
 - [ ] **Step 5: Run, format, lint, commit**
 
-Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test -p blastradius-core --lib runtime 2>&1 | grep -E 'test result|FAILED'`
+Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test -p vernier-core --lib runtime 2>&1 | grep -E 'test result|FAILED'`
 Expected: 3 tests pass. Then the full `cargo test`.
 
 ```bash
-git add crates/blastradius-core/src/runtime crates/blastradius-core/src/lib.rs
+git add crates/vernier-core/src/runtime crates/vernier-core/src/lib.rs
 git commit -m "feat(runtime): runtime graph types and the servicegraph scrape parser" -m "A RuntimeGraph is what every runtime source produces: the service names seen and one call per (client, server) with summed counts and the kind the source knows. The first parser reads the OpenTelemetry Collector's traces_service_graph_request_total samples from a Prometheus scrape, typing calls by connection_type."
 ```
 
@@ -576,8 +576,8 @@ git commit -m "feat(runtime): runtime graph types and the servicegraph scrape pa
 ### Task 3: OTLP JSON span parser and Datadog dependency parser
 
 **Files:**
-- Create: `crates/blastradius-core/src/runtime/otlp.rs`, `crates/blastradius-core/src/runtime/datadog.rs`
-- Modify: `crates/blastradius-core/src/runtime/mod.rs` (`pub mod otlp; pub mod datadog;`)
+- Create: `crates/vernier-core/src/runtime/otlp.rs`, `crates/vernier-core/src/runtime/datadog.rs`
+- Modify: `crates/vernier-core/src/runtime/mod.rs` (`pub mod otlp; pub mod datadog;`)
 
 **Interfaces:**
 - Produces:
@@ -702,7 +702,7 @@ mod tests {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core --lib runtime 2>&1 | grep -E 'error|test result' | head`
+Run: `cargo test -p vernier-core --lib runtime 2>&1 | grep -E 'error|test result' | head`
 Expected: compile errors, modules missing.
 
 - [ ] **Step 3: Implement `otlp.rs`**
@@ -947,27 +947,27 @@ Note `parse("{}")` errors on the empty object; `{"lonely": {"calls": []}}` is va
 
 - [ ] **Step 5: Run, format, lint, commit**
 
-Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test -p blastradius-core --lib runtime 2>&1 | grep -E 'test result|FAILED'`
+Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test -p vernier-core --lib runtime 2>&1 | grep -E 'test result|FAILED'`
 Expected: 7 tests pass.
 
 ```bash
-git add crates/blastradius-core/src/runtime
+git add crates/vernier-core/src/runtime
 git commit -m "feat(runtime): OTLP JSON span pairing and Datadog service dependencies" -m "Spans are paired across services through their parent, or through peer.service on client and producer spans, and typed by messaging.system, db.system and rpc.system. Datadog's dependency map gives callee lists with no counts and no protocol, so those calls are Unknown and count-less."
 ```
 
 ---
 
-### Task 4: `blast-radius.config.json` and name matching
+### Task 4: `vernier.config.json` and name matching
 
 **Files:**
-- Create: `crates/blastradius-core/src/config.rs`, `crates/blastradius-core/src/runtime/matching.rs`
-- Modify: `Cargo.toml` (workspace: `strsim = "0.11"`), `crates/blastradius-core/Cargo.toml` (`strsim.workspace = true`), `crates/blastradius-core/src/lib.rs` (`pub mod config;`), `crates/blastradius-core/src/runtime/mod.rs` (`pub mod matching;`)
+- Create: `crates/vernier-core/src/config.rs`, `crates/vernier-core/src/runtime/matching.rs`
+- Modify: `Cargo.toml` (workspace: `strsim = "0.11"`), `crates/vernier-core/Cargo.toml` (`strsim.workspace = true`), `crates/vernier-core/src/lib.rs` (`pub mod config;`), `crates/vernier-core/src/runtime/mod.rs` (`pub mod matching;`)
 
 **Interfaces:**
 - Produces:
   ```rust
   // config.rs
-  pub const FILE_NAME: &str = "blast-radius.config.json";
+  pub const FILE_NAME: &str = "vernier.config.json";
   #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
   pub struct Config { #[serde(default)] pub runtime: RuntimeConfig }
   #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -1025,7 +1025,7 @@ mod tests {
 
     #[test]
     fn invalid_json_is_an_error_naming_the_file() {
-        let root = std::env::temp_dir().join(format!("blast-radius-config-test-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("vernier-config-test-{}", std::process::id()));
         std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join(FILE_NAME), "{ not json").unwrap();
         let err = load(&root).unwrap_err();
@@ -1035,10 +1035,10 @@ mod tests {
 }
 ```
 
-`runtime-app`'s `blast-radius.config.json` is created in this task (only that file; the rest of the fixture comes in Task 5):
+`runtime-app`'s `vernier.config.json` is created in this task (only that file; the rest of the fixture comes in Task 5):
 
 ```
-test/fixtures/runtime-app/blast-radius.config.json
+test/fixtures/runtime-app/vernier.config.json
 {
   "runtime": {
     "map": { "pay": "payment" },
@@ -1131,15 +1131,15 @@ The `chckout` score: Jaro–Winkler of `chckout` and `checkout` is 0.967, printe
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core --lib 2>&1 | grep -E 'error|test result' | head`
+Run: `cargo test -p vernier-core --lib 2>&1 | grep -E 'error|test result' | head`
 Expected: compile errors (modules missing, `strsim` unknown).
 
 - [ ] **Step 3: Dependencies and `config.rs`**
 
-In the workspace `Cargo.toml` `[workspace.dependencies]` add `strsim = "0.11"`; in `crates/blastradius-core/Cargo.toml` add `strsim.workspace = true`.
+In the workspace `Cargo.toml` `[workspace.dependencies]` add `strsim = "0.11"`; in `crates/vernier-core/Cargo.toml` add `strsim.workspace = true`.
 
 ```rust
-//! `blast-radius.config.json` at the repository root. Read only when a stage
+//! `vernier.config.json` at the repository root. Read only when a stage
 //! needs it; absent means defaults; invalid means an error, because a file
 //! the user wrote must not be silently skipped. Unknown keys are ignored so
 //! later stages can add their own.
@@ -1151,7 +1151,7 @@ use thiserror::Error;
 
 use crate::fs::read_text;
 
-pub const FILE_NAME: &str = "blast-radius.config.json";
+pub const FILE_NAME: &str = "vernier.config.json";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct Config {
@@ -1259,7 +1259,7 @@ pub fn match_names(
         if let Some(target) = config.map.get(name) {
             let Some(service) = services.iter().find(|s| &s.name == target) else {
                 return Err(RuntimeError::Config(format!(
-                    "blast-radius.config.json maps {name} to {target}, which was not discovered"
+                    "vernier.config.json maps {name} to {target}, which was not discovered"
                 )));
             };
             out.push(mapping(Some(service), MatchHow::Config));
@@ -1295,12 +1295,12 @@ Add `pub mod matching;` to `runtime/mod.rs`.
 
 - [ ] **Step 5: Run, format, lint, commit**
 
-Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test -p blastradius-core --lib 2>&1 | grep -E 'test result|FAILED'`
+Run: `cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test -p vernier-core --lib 2>&1 | grep -E 'test result|FAILED'`
 Expected: all pass, including the five new tests.
 
 ```bash
-git add Cargo.toml Cargo.lock crates/blastradius-core test/fixtures/runtime-app/blast-radius.config.json
-git commit -m "feat(runtime): name matching through config, exact, normalised and fuzzy tiers" -m "blast-radius.config.json maps or ignores runtime names explicitly and is consulted first, because an explicit mapping must beat a wrong guess. Exact and normalised matches reuse discovery's normaliser; fuzzy matches need Jaro-Winkler 0.9 on names of four characters or more and are reported as such. A config entry naming an undiscovered service is an error."
+git add Cargo.toml Cargo.lock crates/vernier-core test/fixtures/runtime-app/vernier.config.json
+git commit -m "feat(runtime): name matching through config, exact, normalised and fuzzy tiers" -m "vernier.config.json maps or ignores runtime names explicitly and is consulted first, because an explicit mapping must beat a wrong guess. Exact and normalised matches reuse discovery's normaliser; fuzzy matches need Jaro-Winkler 0.9 on names of four characters or more and are reported as such. A config entry naming an undiscovered service is an error."
 ```
 
 ---
@@ -1308,8 +1308,8 @@ git commit -m "feat(runtime): name matching through config, exact, normalised an
 ### Task 5: Merge rules, `join`, the `runtime-app` fixture and integration tests
 
 **Files:**
-- Create: `crates/blastradius-core/src/runtime/merge.rs`, `crates/blastradius-core/tests/runtime.rs`
-- Modify: `crates/blastradius-core/src/runtime/mod.rs` (`pub mod merge;`, `join`), `crates/blastradius-core/src/graph.rs` (`edges_mut`, `sort_edges`), `crates/blastradius-core/src/lib.rs`
+- Create: `crates/vernier-core/src/runtime/merge.rs`, `crates/vernier-core/tests/runtime.rs`
+- Modify: `crates/vernier-core/src/runtime/mod.rs` (`pub mod merge;`, `join`), `crates/vernier-core/src/graph.rs` (`edges_mut`, `sort_edges`), `crates/vernier-core/src/lib.rs`
 - Create: `test/fixtures/runtime-app/**` (all files except the config, which Task 4 made)
 
 **Interfaces:**
@@ -1430,13 +1430,13 @@ The Go file uses a tab before `uri`. Static edges this fixture yields before any
 
 - [ ] **Step 2: Write the failing tests**
 
-`crates/blastradius-core/tests/runtime.rs`:
+`crates/vernier-core/tests/runtime.rs`:
 
 ```rust
 mod common;
 
-use blastradius::runtime::{self, RuntimeGraph};
-use blastradius::*;
+use vernier::runtime::{self, RuntimeGraph};
+use vernier::*;
 use common::fixture;
 use pretty_assertions::assert_eq;
 
@@ -1552,7 +1552,7 @@ fn json_contract_with_a_runtime_source() {
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core --test runtime 2>&1 | grep -E 'error|FAILED|test result' | head`
+Run: `cargo test -p vernier-core --test runtime 2>&1 | grep -E 'error|FAILED|test result' | head`
 Expected: compile errors (`runtime::join`, `merge` missing).
 
 - [ ] **Step 4: `graph.rs` additions**
@@ -1782,7 +1782,7 @@ Re-export from `lib.rs`: `pub use runtime::{RuntimeCall, RuntimeError, RuntimeGr
 
 - [ ] **Step 7: Run the tests until green**
 
-Run: `cargo test -p blastradius-core 2>&1 | grep -E 'FAILED|panicked|test result'`
+Run: `cargo test -p vernier-core 2>&1 | grep -E 'FAILED|panicked|test result'`
 Expected: all pass. Likely first failures: the fuzzy score string (see Task 4's note; use the value `strsim` gives); the `RuntimeServices { runtime: 10, matched: 8 }` count (ten distinct runtime names in `traces.prom`; eight have a service; `load-generator` is ignored and `auth-proxy` unmatched); the Datadog `matched: 5` (`checkout-api`, `payment`, `catalogue-service`, `orders`, `notifications` matched; `auth-proxy` not).
 
 - [ ] **Step 8: Format, lint, commit**
@@ -1798,8 +1798,8 @@ git commit -m "feat(runtime): merge runtime calls into the graph under the build
 ### Task 6: Fetching, input detection and `load`
 
 **Files:**
-- Create: `crates/blastradius-core/src/runtime/fetch.rs`
-- Modify: `crates/blastradius-core/src/runtime/mod.rs` (`pub mod fetch;`, `RuntimeInput`, `detect`, `load`), `Cargo.toml` (`ureq = "3"`), `crates/blastradius-core/Cargo.toml`, `crates/blastradius-core/src/lib.rs`
+- Create: `crates/vernier-core/src/runtime/fetch.rs`
+- Modify: `crates/vernier-core/src/runtime/mod.rs` (`pub mod fetch;`, `RuntimeInput`, `detect`, `load`), `Cargo.toml` (`ureq = "3"`), `crates/vernier-core/Cargo.toml`, `crates/vernier-core/src/lib.rs`
 
 **Interfaces:**
 - Produces:
@@ -1871,7 +1871,7 @@ mod tests {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core --lib runtime 2>&1 | grep -E 'error|test result' | head`
+Run: `cargo test -p vernier-core --lib runtime 2>&1 | grep -E 'error|test result' | head`
 Expected: compile errors (`detect`, `load`, `RuntimeInput`, `fetch` missing).
 
 - [ ] **Step 3: Dependency and `fetch.rs`**
@@ -2000,8 +2000,8 @@ git commit -m "feat(runtime): load a runtime input from a file or, when asked, a
 ### Task 7: CLI flags, report header, RUNTIME section, FINDINGS line
 
 **Files:**
-- Modify: `crates/blastradius-cli/src/main.rs`, `crates/blastradius-cli/tests/cli.rs`
-- Modify: `crates/blastradius-core/src/report.rs`, `crates/blastradius-core/tests/runtime.rs`
+- Modify: `crates/vernier-cli/src/main.rs`, `crates/vernier-cli/tests/cli.rs`
+- Modify: `crates/vernier-core/src/report.rs`, `crates/vernier-core/tests/runtime.rs`
 
 **Interfaces:**
 - Consumes: `RuntimeInput`, `runtime::load`, `runtime::join`, `config::load` (Tasks 4–6); `Runtime` block fields (Task 1).
@@ -2020,7 +2020,7 @@ fn report_with_a_runtime_source_shows_the_join() {
     assert!(regex::Regex::new(r"Source\s+OTel\s+traces\.prom").unwrap().is_match(&r), "{r}");
     assert!(regex::Regex::new(r"Edges\s+4 observed \(3 static confirmed, 1 runtime only\) · 2 calls skipped").unwrap().is_match(&r), "{r}");
     assert!(regex::Regex::new(r"chckout\s+checkout\s+fuzzy 0\.97\s+\(check this\)").unwrap().is_match(&r), "{r}");
-    assert!(regex::Regex::new(r"load-generator\s+-\s+ignored \(blast-radius\.config\.json\)").unwrap().is_match(&r), "{r}");
+    assert!(regex::Regex::new(r"load-generator\s+-\s+ignored \(vernier\.config\.json\)").unwrap().is_match(&r), "{r}");
     assert!(regex::Regex::new(r"pay\s+payment\s+config").unwrap().is_match(&r), "{r}");
     assert!(r.contains("1 runtime service matched nothing: auth-proxy"), "{r}");
     assert!(regex::Regex::new(r"checkout\s+->\s+payment\s+http\s+observed").unwrap().is_match(&r), "{r}");
@@ -2038,7 +2038,7 @@ fn report_without_a_runtime_source_is_unchanged() {
 
 Add `regex.workspace = true` under `[dev-dependencies]` of the core crate if the `edges.rs` tests do not already bring it (they do).
 
-In `crates/blastradius-cli/tests/cli.rs` add:
+In `crates/vernier-cli/tests/cli.rs` add:
 
 ```rust
 fn runtime_fixture(file: &str) -> String {
@@ -2136,20 +2136,20 @@ In `main.rs`, add to `Cmd::Analyze`:
         dd_site: String,
 ```
 
-and in `run`, after `let analysis = blastradius::analyze(&path)?;` (make it `let mut analysis`):
+and in `run`, after `let analysis = vernier::analyze(&path)?;` (make it `let mut analysis`):
 
 ```rust
             if let Some(input) = runtime_input(otel, datadog, dd_env, dd_site)? {
-                let config = blastradius::config::load(&analysis.root)?.runtime;
-                let graph = blastradius::runtime::load(&input)?;
-                blastradius::runtime::join(&mut analysis, graph, &config)?;
+                let config = vernier::config::load(&analysis.root)?.runtime;
+                let graph = vernier::runtime::load(&input)?;
+                vernier::runtime::join(&mut analysis, graph, &config)?;
             }
 ```
 
 with, at module level:
 
 ```rust
-use blastradius::RuntimeInput;
+use vernier::RuntimeInput;
 
 /// Which runtime source the flags ask for, if any. A bare `--datadog` means a
 /// live call, which needs `--dd-env`.
@@ -2175,7 +2175,7 @@ fn runtime_input(
 }
 ```
 
-Errors propagate through the existing `anyhow` path: `blast-radius: <message>` on stderr, exit 1, nothing on stdout.
+Errors propagate through the existing `anyhow` path: `vernier: <message>` on stderr, exit 1, nothing on stdout.
 
 - [ ] **Step 4: Report**
 
@@ -2243,7 +2243,7 @@ fn runtime_section(analysis: &Analysis, c: &Paint, out: &mut Vec<String>) {
     out.push(format!("  {}", c.dim(&format!("{:<w_name$}  {:<w_service$}  HOW", "RUNTIME NAME", "SERVICE"))));
     for m in r.mapping.iter().filter(|m| m.how != "unmatched") {
         let how = match m.how.as_str() {
-            "ignored" => "ignored (blast-radius.config.json)".to_string(),
+            "ignored" => "ignored (vernier.config.json)".to_string(),
             h if h.starts_with("fuzzy") => format!("{h}  (check this)"),
             h => h.to_string(),
         };
@@ -2318,8 +2318,8 @@ Status table: the Stage 3 row becomes `| 3. Join | Optional runtime edges from O
 In the intro, after the `analyze` examples, add:
 
 ```bash
-./target/release/blast-radius analyze /path/to/a/repository --otel traces.prom     # servicegraph scrape or OTLP JSON
-./target/release/blast-radius analyze /path/to/a/repository --datadog deps.json    # saved service_dependencies response
+./target/release/vernier analyze /path/to/a/repository --otel traces.prom     # servicegraph scrape or OTLP JSON
+./target/release/vernier analyze /path/to/a/repository --datadog deps.json    # saved service_dependencies response
 ```
 
 Add a section "## How the runtime join works" after "## How mapping works":
@@ -2334,7 +2334,7 @@ OTLP JSON span export, as a file or a URL; `--datadog` takes a saved
 pass a URL or ask for the live call.
 
 Runtime names rarely equal repository names. Each one is matched in order: an
-entry in `blast-radius.config.json` (`{"runtime": {"map": {"checkout-api":
+entry in `vernier.config.json` (`{"runtime": {"map": {"checkout-api":
 "checkout"}, "ignore": ["load-generator"]}}`), the exact name, the normalised name
 (`checkout-api`, `CheckoutService` and `checkout` are the same), then a fuzzy match
 that is flagged for you to check. The whole table is printed, and the header says

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `blast-radius analyze` reports the three remaining static edge types: `event` edges from producer to consumer joined on a topic, queue or event type; `database` edges between services that share a database; `import` edges from cross-service package, module and project references. Every edge carries file-and-line evidence and a confidence label, and the corpus test asserts the documented ones on robot-shop, eShop, train-ticket and the OpenTelemetry demo.
+**Goal:** `vernier analyze` reports the three remaining static edge types: `event` edges from producer to consumer joined on a topic, queue or event type; `database` edges between services that share a database; `import` edges from cross-service package, module and project references. Every edge carries file-and-line evidence and a confidence label, and the corpus test asserts the documented ones on robot-shop, eShop, train-ticket and the OpenTelemetry demo.
 
 **Architecture:** Same three layers as the first Stage 2 plan. The facts layer gains one fact, `Setting` (a name bound to a literal: `host: mongodb` in YAML, `EXCHANGE = 'robot-shop'` in code), so configuration values and constants become visible without any module knowing a language. Three new matchers under `map/matchers/` turn facts into candidates. Two of them need a repository-wide join (who else produces this topic, who else uses this database), so `map::run` runs a pre-pass over every file's facts that fills a `Joins` index, and the resolver gains `resolve_all`, which fans one candidate out to every counterpart. A per-service symbol table resolves constants (`self.EXCHANGE`, `Queues.queueName`) to the literals assigned to them.
 
@@ -26,20 +26,20 @@
 ## File Structure
 
 ```
-crates/blastradius-core/src/map/facts/mod.rs        + Fact::Setting; runs the assignments pass for tree-sitter languages
-crates/blastradius-core/src/map/facts/regex.rs      + settings(): key/value, XML element, Dockerfile ENV; assignments(): `name = ... "literal"`
-crates/blastradius-core/src/map/facts/treesitter.rs + Go composite literals as calls; annotation values that are symbols; C# Configuration["KEY"]
-crates/blastradius-core/src/map/symbols.rs          NEW  Symbols: service -> name -> literals, built from Setting facts; lookup() for `self.X`, `Queues.name`
-crates/blastradius-core/src/map/config.rs           + packages read from each service's manifest; dotenv self-interpolation; compose `- KEY` pass-through
-crates/blastradius-core/src/map/resolve.rs          + Joins, TopicSides, Resolved.source, resolve_all(), Topic/Broker/Database/Package/PackagePath, is_hostish_key(), ado_connection()
-crates/blastradius-core/src/map/matchers/mod.rs     + FileContext.symbols; all() registers event, database, import
-crates/blastradius-core/src/map/matchers/http.rs    + Setting handling, ADO.NET connection strings
-crates/blastradius-core/src/map/matchers/event.rs   NEW  mentions(), roles, topic keys, broker families, topic_index()
-crates/blastradius-core/src/map/matchers/database.rs NEW keys(), database_index(), key_from_url(), key_from_connection_string()
-crates/blastradius-core/src/map/matchers/import.rs  NEW  imports, manifest dependencies, project references
-crates/blastradius-core/src/map/mod.rs              + Target variants, TopicRole, owner_of_path(); run() builds symbols and joins; resolve_all; source override
-crates/blastradius-core/src/report.rs               + Shared databases finding; wording of the no-edges line
-crates/blastradius-core/tests/edges.rs              + one test per fixture, report test
+crates/vernier-core/src/map/facts/mod.rs        + Fact::Setting; runs the assignments pass for tree-sitter languages
+crates/vernier-core/src/map/facts/regex.rs      + settings(): key/value, XML element, Dockerfile ENV; assignments(): `name = ... "literal"`
+crates/vernier-core/src/map/facts/treesitter.rs + Go composite literals as calls; annotation values that are symbols; C# Configuration["KEY"]
+crates/vernier-core/src/map/symbols.rs          NEW  Symbols: service -> name -> literals, built from Setting facts; lookup() for `self.X`, `Queues.name`
+crates/vernier-core/src/map/config.rs           + packages read from each service's manifest; dotenv self-interpolation; compose `- KEY` pass-through
+crates/vernier-core/src/map/resolve.rs          + Joins, TopicSides, Resolved.source, resolve_all(), Topic/Broker/Database/Package/PackagePath, is_hostish_key(), ado_connection()
+crates/vernier-core/src/map/matchers/mod.rs     + FileContext.symbols; all() registers event, database, import
+crates/vernier-core/src/map/matchers/http.rs    + Setting handling, ADO.NET connection strings
+crates/vernier-core/src/map/matchers/event.rs   NEW  mentions(), roles, topic keys, broker families, topic_index()
+crates/vernier-core/src/map/matchers/database.rs NEW keys(), database_index(), key_from_url(), key_from_connection_string()
+crates/vernier-core/src/map/matchers/import.rs  NEW  imports, manifest dependencies, project references
+crates/vernier-core/src/map/mod.rs              + Target variants, TopicRole, owner_of_path(); run() builds symbols and joins; resolve_all; source override
+crates/vernier-core/src/report.rs               + Shared databases finding; wording of the no-edges line
+crates/vernier-core/tests/edges.rs              + one test per fixture, report test
 test/fixtures/edges-events-app/                     compose + python, go, js, cs, java services; rabbitmq and kafka images
 test/fixtures/edges-db-app/                         compose + .env + go, js, java, python, cs services; mongo, mysql, postgres, valkey images
 test/fixtures/edges-import-app/                     monorepo: apps/, packages/, services/ with js, go, cs, java, rust, python members
@@ -53,10 +53,10 @@ docs/superpowers/specs/2026-09-06-rust-engine-stage2-design.md  + decisions made
 ### Task 1: Setting facts, assignments, and three tree-sitter refinements
 
 **Files:**
-- Modify: `crates/blastradius-core/src/map/facts/mod.rs` (Fact enum, `extract`, tests)
-- Modify: `crates/blastradius-core/src/map/facts/regex.rs` (new regexes, `settings`, `assignments`)
-- Modify: `crates/blastradius-core/src/map/facts/treesitter.rs` (GO table, `args_of`, `on_annotation`, C# element access, `walk`)
-- Modify: `crates/blastradius-core/src/map/matchers/http.rs:151` (exhaustive match gains `Fact::Setting { .. }`)
+- Modify: `crates/vernier-core/src/map/facts/mod.rs` (Fact enum, `extract`, tests)
+- Modify: `crates/vernier-core/src/map/facts/regex.rs` (new regexes, `settings`, `assignments`)
+- Modify: `crates/vernier-core/src/map/facts/treesitter.rs` (GO table, `args_of`, `on_annotation`, C# element access, `walk`)
+- Modify: `crates/vernier-core/src/map/matchers/http.rs:151` (exhaustive match gains `Fact::Setting { .. }`)
 
 **Interfaces:**
 - Produces:
@@ -193,7 +193,7 @@ Add inside `mod tests`, after the existing helpers, a `settings` helper and five
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `export PATH="/opt/homebrew/opt/rustup/bin:$PATH" && cargo test -p blastradius-core --lib facts 2>&1 | tail -30`
+Run: `export PATH="/opt/homebrew/opt/rustup/bin:$PATH" && cargo test -p vernier-core --lib facts 2>&1 | tail -30`
 Expected: compile error `no variant named Setting` (the helper references `Fact::Setting`).
 
 - [ ] **Step 3: Add the fact and the regex passes**
@@ -486,7 +486,7 @@ In `matchers/http.rs`, the last match arm becomes `Fact::Annotation { .. } | Fac
 
 - [ ] **Step 5: Run the facts tests until they pass**
 
-Run: `cargo test -p blastradius-core --lib facts 2>&1 | tail -40`
+Run: `cargo test -p vernier-core --lib facts 2>&1 | tail -40`
 Expected: all `facts::tests` pass, including the five new ones and the four existing ones. If `go_composite_literals_are_calls` fails with `Other("\"orders\"")`, the value node is wrapped once more than expected: print `node.kind()` chain in `unwrap_argument` and extend the match with the kind you see. If `assignments_bind_names_to_literals_in_every_language` picks up `("a", ...)` from `if a == 'x'`, the `[^=>\s]` guard is missing.
 
 - [ ] **Step 6: Run the whole suite, format, lint**
@@ -497,7 +497,7 @@ Expected: every `test result: ok`. The existing `http_edges_from_literals_env_te
 - [ ] **Step 7: Commit**
 
 ```bash
-git add crates/blastradius-core/src/map/facts crates/blastradius-core/src/map/matchers/http.rs
+git add crates/vernier-core/src/map/facts crates/vernier-core/src/map/matchers/http.rs
 git commit -m "feat(facts): settings, assignments, Go struct literals, annotation symbols, .NET configuration reads" -m "A Setting fact binds a name to a literal: key/value lines, XML elements and Dockerfile ENV in configuration files, and name = \"literal\" assignments in every language, so constants such as EXCHANGE = 'robot-shop' and Queues.queueName = \"email\" become visible to matchers. Go composite literals are calls with their keyed values as arguments, so sarama.ProducerMessage{Topic: \"orders\"} names its topic. Annotation values that are identifiers are kept as Other arguments. builder.Configuration[\"KEY\"] is an environment reference."
 ```
 
@@ -508,12 +508,12 @@ git commit -m "feat(facts): settings, assignments, Go struct literals, annotatio
 Three gaps the corpus showed. Spring's `spring.data.mongodb.host: ts-order-mongo` names a datastore without a URL. The OpenTelemetry demo's cart reads `VALKEY_ADDR` whose compose entry is the bare `- VALKEY_ADDR` (value taken from `.env`, where it is `valkey-cart:${VALKEY_PORT}`, a reference to another dotenv line). Its product catalog reads `DB_CONNECTION_STRING`, a name no hostish suffix covers. This task also creates the `edges-db-app` fixture in full; Task 5 adds tests on it for shared databases.
 
 **Files:**
-- Modify: `crates/blastradius-core/src/map/resolve.rs` (`HOSTISH_SUFFIXES`, `is_hostish_key`, `ado_connection`, tests)
-- Modify: `crates/blastradius-core/src/map/matchers/http.rs` (`from_setting`, ADO.NET strings, tests)
-- Modify: `crates/blastradius-core/src/discover/env.rs` (`load_compose_env` interpolates against itself)
-- Modify: `crates/blastradius-core/src/map/config.rs` (`read_dotenv` interpolation, `read_environment_node` bare keys, tests)
+- Modify: `crates/vernier-core/src/map/resolve.rs` (`HOSTISH_SUFFIXES`, `is_hostish_key`, `ado_connection`, tests)
+- Modify: `crates/vernier-core/src/map/matchers/http.rs` (`from_setting`, ADO.NET strings, tests)
+- Modify: `crates/vernier-core/src/discover/env.rs` (`load_compose_env` interpolates against itself)
+- Modify: `crates/vernier-core/src/map/config.rs` (`read_dotenv` interpolation, `read_environment_node` bare keys, tests)
 - Create: `test/fixtures/edges-db-app/**` (listed below)
-- Modify: `crates/blastradius-core/tests/edges.rs` (new test)
+- Modify: `crates/vernier-core/tests/edges.rs` (new test)
 
 **Interfaces:**
 - Produces:
@@ -823,7 +823,7 @@ The last assertion may need adjusting once the fixture runs (for instance `MONGO
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core 2>&1 | grep -E 'error\[|FAILED|panicked|test result' | head`
+Run: `cargo test -p vernier-core 2>&1 | grep -E 'error\[|FAILED|panicked|test result' | head`
 Expected: compile errors for `is_hostish_key`, `ado_connection`; after stubbing them, `database_edges_from_settings_connection_strings_and_dotenv` fails on `inventory -> mongodb`.
 
 - [ ] **Step 4: Resolver helpers**
@@ -1050,7 +1050,7 @@ Expected: all green, including `parity` (the discovery fixtures' dotenv files ha
 - [ ] **Step 8: Commit**
 
 ```bash
-git add crates/blastradius-core/src test/fixtures/edges-db-app
+git add crates/vernier-core/src test/fixtures/edges-db-app
 git commit -m "feat(map): settings name hosts; dotenv and compose pass-through values reach the resolver" -m "A configuration setting whose key says it holds a host (spring.data.mongodb.host, bootstrap-servers, ENV REDIS_HOST) is a Static candidate for the value. ADO.NET connection strings name their host. _CONNECTION_STRING and _DSN are hostish suffixes. Dotenv values interpolate against earlier lines of the same file, and a compose environment entry without a value takes the value the .env beside it declares, which is how the OpenTelemetry demo wires VALKEY_ADDR. The edges-db-app fixture covers each shape."
 ```
 
@@ -1061,9 +1061,9 @@ git commit -m "feat(map): settings name hosts; dotenv and compose pass-through v
 The resolver learns five targets. Three need repository-wide knowledge the pre-pass supplies through `Joins`: who produces and consumes each topic, who uses each database key, who owns each proto service (moved in from the bare `HashMap`). Two need the package index `ConfigIndex` will hold from Task 6; this task adds the field and resolution so Task 6 only has to fill it.
 
 **Files:**
-- Modify: `crates/blastradius-core/src/map/mod.rs` (`Target`, `TopicRole`, `owner_of_path`, `collect_outcomes`, `partition_files`, `run`)
-- Modify: `crates/blastradius-core/src/map/resolve.rs` (`Joins`, `TopicSides`, `Resolved.source`, `Resolver::new`, `resolve_all`, five resolutions, tests)
-- Modify: `crates/blastradius-core/src/map/config.rs` (`Package`, `packages` field)
+- Modify: `crates/vernier-core/src/map/mod.rs` (`Target`, `TopicRole`, `owner_of_path`, `collect_outcomes`, `partition_files`, `run`)
+- Modify: `crates/vernier-core/src/map/resolve.rs` (`Joins`, `TopicSides`, `Resolved.source`, `Resolver::new`, `resolve_all`, five resolutions, tests)
+- Modify: `crates/vernier-core/src/map/config.rs` (`Package`, `packages` field)
 
 **Interfaces:**
 - Produces:
@@ -1313,7 +1313,7 @@ Imports needed at the top of the test module: `use crate::map::{Target, TopicRol
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core --lib resolve 2>&1 | grep -E 'error|FAILED|test result' | head`
+Run: `cargo test -p vernier-core --lib resolve 2>&1 | grep -E 'error|FAILED|test result' | head`
 Expected: compile errors: `Joins`, `TopicSides`, `TopicRole`, `Target::Topic` not found.
 
 - [ ] **Step 3: Targets, roles and path ownership in `map/mod.rs`**
@@ -1615,7 +1615,7 @@ Expected: all green. No fixture output changes (nothing emits the new targets ye
 - [ ] **Step 8: Commit**
 
 ```bash
-git add crates/blastradius-core/src/map
+git add crates/vernier-core/src/map
 git commit -m "feat(map): resolver joins for topics, brokers, shared databases, packages and project paths" -m "The resolver takes a Joins index from the pre-pass over every file's facts and gains resolve_all, which fans one candidate out to every counterpart: a producer's topic to each consumer (Inferred, producer to consumer), a consumer's to each producer with the edge's source overridden, a database key to every other service using it, a client library to each discovered broker of its family. Packages resolve by exact name or a prefix ending at a separator, project paths by the service whose root owns them, both Static. A topic with one side only is listed as topic:<key>; an import that matches no discovered package is an external library and is dropped."
 ```
 
@@ -1626,13 +1626,13 @@ git commit -m "feat(map): resolver joins for topics, brokers, shared databases, 
 The corpus almost never writes a topic as a literal at the call. robot-shop's payment publishes `exchange=self.EXCHANGE, routing_key=self.ROUTING_KEY` with `EXCHANGE = 'robot-shop'` a few lines up; train-ticket listens with `@RabbitListener(queues = Queues.queueName)` and `queueName = "email"` sits in a sibling file; eShop publishes a variable and constructs `new OrderStartedIntegrationEvent(...)` somewhere else. So: a per-service symbol table from `Setting` facts, and "constructs an event type" counts as producing it.
 
 **Files:**
-- Create: `crates/blastradius-core/src/map/symbols.rs`
-- Create: `crates/blastradius-core/src/map/matchers/event.rs`
-- Modify: `crates/blastradius-core/src/map/matchers/mod.rs` (`FileContext.symbols`, `all()`)
-- Modify: `crates/blastradius-core/src/map/mod.rs` (`pub mod symbols;`, `run` builds symbols and `joins.topics`)
-- Modify: `crates/blastradius-core/src/map/matchers/http.rs` tests (add `symbols` to `FileContext`)
+- Create: `crates/vernier-core/src/map/symbols.rs`
+- Create: `crates/vernier-core/src/map/matchers/event.rs`
+- Modify: `crates/vernier-core/src/map/matchers/mod.rs` (`FileContext.symbols`, `all()`)
+- Modify: `crates/vernier-core/src/map/mod.rs` (`pub mod symbols;`, `run` builds symbols and `joins.topics`)
+- Modify: `crates/vernier-core/src/map/matchers/http.rs` tests (add `symbols` to `FileContext`)
 - Create: `test/fixtures/edges-events-app/**`
-- Modify: `crates/blastradius-core/tests/edges.rs`
+- Modify: `crates/vernier-core/tests/edges.rs`
 
 **Interfaces:**
 - Produces:
@@ -1963,7 +1963,7 @@ fn event_edges_join_producers_to_consumers_and_brokers_to_libraries() {
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core 2>&1 | grep -E 'error\[|FAILED|test result' | head`
+Run: `cargo test -p vernier-core 2>&1 | grep -E 'error\[|FAILED|test result' | head`
 Expected: compile errors (`symbols` module, `FileContext.symbols`, `event` module missing).
 
 - [ ] **Step 4: `symbols.rs`**
@@ -2407,7 +2407,7 @@ and `collect_outcomes` takes `symbols: &Symbols` and sets `symbols` on each `Fil
 
 - [ ] **Step 6: Run the tests until green**
 
-Run: `cargo test -p blastradius-core 2>&1 | grep -E 'FAILED|panicked|test result'`
+Run: `cargo test -p vernier-core 2>&1 | grep -E 'FAILED|panicked|test result'`
 Expected: all pass. Likely first failures and their causes:
 - `payment -> notifications` missing: `basic_publish(exchange='', routing_key='email', ...)` gives `Str("")` (skipped) and `Str("email")`; check `is_topic_key("email")` is true (it is: not in `STOP_KEYS`).
 - `checkout -> accounting` missing: `_consumer.Subscribe(TopicName)` needs `TopicName` in accounting's symbols, which needs the `ASSIGN` regex to accept `private static readonly string TopicName = ... ?? "order-created";`.
@@ -2423,7 +2423,7 @@ Expected, at least: robot-shop `payment -> dispatch event inferred`; train-ticke
 
 ```bash
 cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test 2>&1 | grep -E '^test result|FAILED'
-git add crates/blastradius-core/src/map test/fixtures/edges-events-app crates/blastradius-core/tests/edges.rs
+git add crates/vernier-core/src/map test/fixtures/edges-events-app crates/vernier-core/tests/edges.rs
 git commit -m "feat(map): event edges from producers to consumers, joined on topics, queues and event types" -m "The event matcher reads publish, send, produce, subscribe, consume and declare calls by library (pika, amqplib, streadway/amqp, kafkajs, sarama, Confluent.Kafka, Spring templates), listener annotations, typed event buses (new XIntegrationEvent, AddSubscription<X, H>, IIntegrationEventHandler<X>) and Go struct literals. A topic written as a constant resolves through a per-service symbol table built from Setting facts, which is how robot-shop's self.EXCHANGE and train-ticket's Queues.queueName are read. Producers join consumers through the resolver's topic index, Inferred, producer to consumer, with evidence from both sides. A client library import gives an Inferred edge to the discovered broker of its family. A topic with only one side is listed as topic:<key>."
 ```
 
@@ -2434,10 +2434,10 @@ git commit -m "feat(map): event edges from producers to consumers, joined on top
 The http matcher already gives every service its edge to the datastore it names. What is missing is the join the spec calls "an important edge": two code services on the same database. The key is `host/dbname` from a URL, a connection string, or a host setting paired with a database setting in the same file; or a named database resource (`AddNpgsqlDbContext<X>("orderingdb")`, `GetConnectionString("orderingdb")`). A bare host with no database name is not a key: two services on the same MySQL server with different schemas do not share data, and the spec's key is "host plus database name".
 
 **Files:**
-- Create: `crates/blastradius-core/src/map/matchers/database.rs`
-- Modify: `crates/blastradius-core/src/map/matchers/mod.rs` (`pub mod database;`, `all()`)
-- Modify: `crates/blastradius-core/src/map/mod.rs` (`joins.databases`)
-- Modify: `crates/blastradius-core/tests/edges.rs`
+- Create: `crates/vernier-core/src/map/matchers/database.rs`
+- Modify: `crates/vernier-core/src/map/matchers/mod.rs` (`pub mod database;`, `all()`)
+- Modify: `crates/vernier-core/src/map/mod.rs` (`joins.databases`)
+- Modify: `crates/vernier-core/tests/edges.rs`
 
 **Interfaces:**
 - Produces:
@@ -2565,7 +2565,7 @@ fn shared_databases_join_services_in_both_directions() {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core 2>&1 | grep -E 'error\[|FAILED|test result' | head`
+Run: `cargo test -p vernier-core 2>&1 | grep -E 'error\[|FAILED|test result' | head`
 Expected: compile error, `database` module missing.
 
 - [ ] **Step 3: `matchers/database.rs`**
@@ -2807,7 +2807,7 @@ impl Matcher for Database {
 
 - [ ] **Step 4: Run the tests until green**
 
-Run: `cargo test -p blastradius-core 2>&1 | grep -E 'FAILED|panicked|test result'`
+Run: `cargo test -p vernier-core 2>&1 | grep -E 'FAILED|panicked|test result'`
 Expected: all pass. If `orders <-> reports` is missing, the template in `orders/.../application.yml` did not render: `env_default("DB_HOST:mysql")` must return `("DB_HOST", Some("mysql"))` (it does), and the `Template` fact must come from the regex extractor's `push_string`. If `catalogue -> user` appears, `key_from_url` is dropping the database name.
 
 - [ ] **Step 5: Check the corpus**
@@ -2819,7 +2819,7 @@ Expected: eShop `Ordering.API -> OrderProcessor database inferred` and the rever
 
 ```bash
 cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test 2>&1 | grep -E '^test result|FAILED'
-git add crates/blastradius-core/src/map crates/blastradius-core/tests/edges.rs
+git add crates/vernier-core/src/map crates/vernier-core/tests/edges.rs
 git commit -m "feat(map): database edges between services that share a database" -m "Each file's database keys come from database URLs, JDBC and ADO.NET connection strings, PDO DSNs, environment variables through their configured value or default, templates rendered with their defaults, a host setting paired with a database setting in the same file, Aspire named resources (AddNpgsqlDbContext(\"orderingdb\"), GetConnectionString) and client options objects. The key is host plus database name, or the resource name; a bare host is not a key. Two code services on one key get an Inferred database edge each way naming the key, which is how eShop's Ordering.API and OrderProcessor, and four train-ticket services defaulting to one MySQL schema, show up."
 ```
 
@@ -2828,11 +2828,11 @@ git commit -m "feat(map): database edges between services that share a database"
 ### Task 6: Package index and the import matcher
 
 **Files:**
-- Modify: `crates/blastradius-core/src/map/config.rs` (`read_packages`, tests)
-- Create: `crates/blastradius-core/src/map/matchers/import.rs`
-- Modify: `crates/blastradius-core/src/map/matchers/mod.rs` (`pub mod import;`, `all()`)
+- Modify: `crates/vernier-core/src/map/config.rs` (`read_packages`, tests)
+- Create: `crates/vernier-core/src/map/matchers/import.rs`
+- Modify: `crates/vernier-core/src/map/matchers/mod.rs` (`pub mod import;`, `all()`)
 - Create: `test/fixtures/edges-import-app/**`
-- Modify: `crates/blastradius-core/tests/edges.rs`
+- Modify: `crates/vernier-core/tests/edges.rs`
 
 **Interfaces:**
 - Produces: `ConfigIndex.packages` filled for every code service from its manifest; `pub struct Import;` implementing `Matcher`.
@@ -3015,7 +3015,7 @@ fn import_edges_from_imports_dependencies_and_project_references() {
 
 - [ ] **Step 3: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core 2>&1 | grep -E 'error\[|FAILED|test result' | head`
+Run: `cargo test -p vernier-core 2>&1 | grep -E 'error\[|FAILED|test result' | head`
 Expected: `packages_are_read_from_every_manifest_kind` fails with an empty list; the edges test fails on `web -> shared`.
 
 - [ ] **Step 4: `read_packages` in `config.rs`**
@@ -3263,19 +3263,19 @@ Register `pub mod import;` and `Box::new(import::Import)` in `matchers/mod.rs`.
 
 - [ ] **Step 6: Run the tests until green**
 
-Run: `cargo test -p blastradius-core 2>&1 | grep -E 'FAILED|panicked|test result'`
+Run: `cargo test -p vernier-core 2>&1 | grep -E 'FAILED|panicked|test result'`
 Expected: all pass. If `edges.len()` is 7 with a `checkout -> checkout`, self-edges are not being dropped for `Package` (they are, through `finish`). If `orders -> common` is missing, `Fact::Setting` for `<artifactId>common</artifactId>` is not produced: the XML regex needs the line to hold the whole element.
 
 - [ ] **Step 7: Check the corpus and this repository**
 
 Run: `CORPUS_VERBOSE=1 cargo test --test corpus -- --nocapture 2>&1 | grep -E '^\S+ +[0-9]+ code| import '`
-Expected: eShop gains its ProjectReference edges (Basket.API → eShop.ServiceDefaults and EventBusRabbitMQ, EventBusRabbitMQ → EventBus, Ordering.API → Ordering.Domain and Ordering.Infrastructure, WebApp → WebAppComponents, HybridApp → WebAppComponents, eShop.AppHost → each API); nothing elsewhere (train-ticket's `ts-common` is not a discovered service; petclinic and ewolff poms reference only parents). Then `cargo run -q -- analyze . --no-color` on this repository must show `blastradius-cli -> blastradius-core import static` from the CLI crate's path dependency.
+Expected: eShop gains its ProjectReference edges (Basket.API → eShop.ServiceDefaults and EventBusRabbitMQ, EventBusRabbitMQ → EventBus, Ordering.API → Ordering.Domain and Ordering.Infrastructure, WebApp → WebAppComponents, HybridApp → WebAppComponents, eShop.AppHost → each API); nothing elsewhere (train-ticket's `ts-common` is not a discovered service; petclinic and ewolff poms reference only parents). Then `cargo run -q -- analyze . --no-color` on this repository must show `vernier-cli -> vernier-core import static` from the CLI crate's path dependency.
 
 - [ ] **Step 8: Format, lint, commit**
 
 ```bash
 cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test 2>&1 | grep -E '^test result|FAILED'
-git add crates/blastradius-core/src/map test/fixtures/edges-import-app crates/blastradius-core/tests/edges.rs
+git add crates/vernier-core/src/map test/fixtures/edges-import-app crates/vernier-core/tests/edges.rs
 git commit -m "feat(map): import edges from packages, modules, artifacts and project references" -m "Every code service declares the names it can be imported by: package.json and composer names, Go module paths, Cargo and Maven artifacts, .csproj stems, and for Python its directory. Imports in code resolve by exact name or a prefix ending at a separator; dependencies in manifests, Maven sibling artifacts, Cargo path dependencies and .csproj ProjectReferences resolve too, the last two by the service whose root owns the referenced path. All Static. Imports of anything else are external libraries and are dropped, not counted as unresolved."
 ```
 
@@ -3284,8 +3284,8 @@ git commit -m "feat(map): import edges from packages, modules, artifacts and pro
 ### Task 7: Report: shared databases and the no-edges line
 
 **Files:**
-- Modify: `crates/blastradius-core/src/report.rs` (`structure`, `findings`)
-- Modify: `crates/blastradius-core/tests/edges.rs`
+- Modify: `crates/vernier-core/src/report.rs` (`structure`, `findings`)
+- Modify: `crates/vernier-core/tests/edges.rs`
 
 **Interfaces:**
 - Consumes: database edges whose evidence detail starts with `shared database <key> with ` (Task 5).
@@ -3330,7 +3330,7 @@ The `ledgerdb` pair is shared under two keys (`ledgerdb` and `localhost/ledgerdb
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `cargo test -p blastradius-core --test edges report 2>&1 | grep -E 'FAILED|panicked|test result'`
+Run: `cargo test -p vernier-core --test edges report 2>&1 | grep -E 'FAILED|panicked|test result'`
 Expected: both new tests fail (no "Shared databases" line; old wording).
 
 - [ ] **Step 3: Implement**
@@ -3412,7 +3412,7 @@ Import `EdgeType` in `report.rs`. Because both directions of a pair carry the sa
 
 ```bash
 cargo fmt --all && cargo clippy --all-targets -- -D warnings && cargo test 2>&1 | grep -E '^test result|FAILED'
-git add crates/blastradius-core/src/report.rs crates/blastradius-core/tests/edges.rs
+git add crates/vernier-core/src/report.rs crates/vernier-core/tests/edges.rs
 git commit -m "feat(report): shared databases finding" -m "FINDINGS lists how many databases two or more code services read, and under each key which services. The no-edges line names every edge type the mapping stage now recognises."
 ```
 
@@ -3514,7 +3514,7 @@ Expected: no `missing edge` lines, `test result: ok`, every repository under 500
 - [ ] **Step 5: Commit**
 
 ```bash
-git add test/expected/corpus crates/blastradius-core/src
+git add test/expected/corpus crates/vernier-core/src
 git commit -m "test(corpus): expected event, database and import edges for four repositories" -m "robot-shop: payment publishes to the exchange dispatch consumes. eShop: eight ProjectReference imports, nine integration-event edges from the AddSubscription wiring, and the orderingdb database Ordering.API shares with OrderProcessor. train-ticket: the email and food_delivery queues through Queues.queueName, and four services whose datasource defaults name one MySQL schema. OpenTelemetry demo: cart to valkey-cart through the compose pass-through of VALKEY_ADDR, product-catalog to astronomy-db through DB_CONNECTION_STRING. <one line per fix made during the junk review>"
 ```
 

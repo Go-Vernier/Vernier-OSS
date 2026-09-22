@@ -1,5 +1,5 @@
 {
-  "name": "blastradius",
+  "name": "vernier",
   "version": "0.0.1",
   "description": "Which services can this change reach? Static analysis of the repository joined with production traces, at pull request time.",
   "license": "MIT",
@@ -11,7 +11,7 @@
   "homepage": "https://github.com/Go-Vernier/Vernier-OSS#readme",
   "bugs": "https://github.com/Go-Vernier/Vernier-OSS/issues",
   "keywords": [
-    "blast-radius",
+    "vernier",
     "microservices",
     "dependency-graph",
     "static-analysis",

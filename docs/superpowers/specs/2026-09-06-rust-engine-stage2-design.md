@@ -20,8 +20,8 @@ every fixture and every corpus repository.
 ```
 Cargo.toml                      workspace
 crates/
-  blastradius-core/             library: discover, facts, map, graph, model, report
-  blastradius-cli/              binary `blast-radius`: clap, terminal output, --json
+  vernier-core/             library: discover, facts, map, graph, model, report
+  vernier-cli/              binary `vernier`: clap, terminal output, --json
 test/fixtures/                  unchanged, shared by both crates' tests
 test/expected/
   discovery/<fixture>.json      TypeScript baseline, checked by a parity test

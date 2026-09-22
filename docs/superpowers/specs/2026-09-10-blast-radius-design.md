@@ -247,13 +247,13 @@ library.
 ## Architecture
 
 ```
-crates/blastradius-core/src/blast.rs     Change, ChangeKind, Blast, Changed, Reached, Hop, Relation, Touched; owners(), radius(), of_change(), widest()
-crates/blastradius-core/src/git.rs       GitError; changed files for a commit, a range, a pull request; first-parent log with PR markers
-crates/blastradius-core/src/history.rs   History, Entry; run(analysis, n, depth)
-crates/blastradius-core/src/html.rs      render(analysis) -> String
-crates/blastradius-core/src/analyze.rs   Analysis.blast, Analysis.history; AnalysisJson gains blast, history (omitted when None)
-crates/blastradius-core/src/report.rs    Change row, BLAST RADIUS, Widest change surface, CHANGE HISTORY; format_report dispatches
-crates/blastradius-cli/src/main.rs       --pr, --diff, --files, --history, --depth, --html
+crates/vernier-core/src/blast.rs     Change, ChangeKind, Blast, Changed, Reached, Hop, Relation, Touched; owners(), radius(), of_change(), widest()
+crates/vernier-core/src/git.rs       GitError; changed files for a commit, a range, a pull request; first-parent log with PR markers
+crates/vernier-core/src/history.rs   History, Entry; run(analysis, n, depth)
+crates/vernier-core/src/html.rs      render(analysis) -> String
+crates/vernier-core/src/analyze.rs   Analysis.blast, Analysis.history; AnalysisJson gains blast, history (omitted when None)
+crates/vernier-core/src/report.rs    Change row, BLAST RADIUS, Widest change surface, CHANGE HISTORY; format_report dispatches
+crates/vernier-cli/src/main.rs       --pr, --diff, --files, --history, --depth, --html
 ```
 
 `analyze(root)` keeps its signature. The CLI calls `analyze`, joins the
