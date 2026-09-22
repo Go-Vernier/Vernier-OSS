@@ -54,6 +54,7 @@ cargo build --release
 ./target/release/vernier analyze /path/to/a/repository --files a/b.js c/d.py  # explicit files
 ./target/release/vernier analyze /path/to/a/repository --history 50           # the last 50 pull requests
 ./target/release/vernier analyze /path/to/a/repository --html report.html     # the self-contained HTML report
+./target/release/vernier tui /path/to/a/repository                            # explore it interactively
 ```
 
 `--pr`, `--diff` and `--files` take one change at a time; `--history` adds a
@@ -368,6 +369,38 @@ changed services are ringed and everything outside the radius is dimmed.
 Clicking a node lists its edges and their evidence. `--json` includes the
 `blast` and `history` blocks, present only when asked for.
 
+## Exploring it in the terminal
+
+`vernier tui` keeps the graph in memory and lets you ask it one question
+after another. It takes the same `--otel`, `--datadog`, `--pr`, `--diff`,
+`--files` and `--depth` flags as `analyze`. `--history N` (default 50) sets how
+many recent pull requests it lists.
+
+| Tab | Shows |
+| --- | --- |
+| 1 Overview | Bar charts of the edges by confidence and by type, the most depended-on services and the widest change surfaces; the repository report below, exactly as `analyze` prints it |
+| 2 Services | Every service; the selected one drawn with what depends on it and what it depends on, its edges, and each edge's evidence |
+| 3 Changes | The recent pull requests, each with its reach as a bar, and the numbers across them |
+| 4 Blast | One change drawn as a tree of the walk, coloured by confidence; its reach by depth and by confidence; the path to the selected service; what it does not reach |
+
+```
+◆ catalogue  changed · 1 file            BY DEPTH
+├── ● cart  calls catalogue (http)       depth 1 ████████████████ 3
+│   ├── ● payment  calls cart (http)     depth 2 ██████████▋      2
+│   │   └── ● dispatch  consumes events  depth 3 █████▎           1
+│   └── ● shipping  calls cart (http)
+├── ● ratings  calls catalogue (http)    BY CONFIDENCE
+└── ● web  calls catalogue (http)        static    ██████████████ 4
+```
+
+`Enter` on a service walks a change to that service's directory; on a pull
+request, it walks that pull request. `d` and `f` on the Changes tab walk a
+diff range or a list of files, and `+`/`-` re-run the walk one hop deeper or
+shallower. `/` filters a list, `?` lists every key, `q` quits. Confidence
+uses the HTML report's colours; `NO_COLOR` turns them off. The TUI computes
+nothing the engine does not, and uses the terminal report's wording, including
+the fixed wording for what is not reached.
+
 ## The confidence model
 
 Every edge carries one of four labels. The weakest label on a path decides
@@ -398,6 +431,8 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings
 sh scripts/corpus.sh                      # shallow-clone the eight reference repositories into corpus/
 cargo test --test corpus -- --nocapture   # discovery counts and timing on the corpus
 cargo run -q -- analyze corpus/robot-shop --files cart/server.js --html /tmp/robot-shop.html
+cargo run -q -- tui corpus/train-ticket
+UPDATE_SNAPSHOTS=1 cargo test -p blastradius-tui   # rewrite the TUI's text snapshots after a deliberate change
 ```
 
 Every change should run against the whole corpus. A regression on one repo

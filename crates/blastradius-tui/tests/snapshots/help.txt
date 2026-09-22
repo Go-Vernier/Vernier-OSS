@@ -1,0 +1,30 @@
+acme/shop · 5 services · static only · depth 3 · 9 edges · 3 infrastructure
+ 1 Overview   2 Services   3 Changes   4 Blast
+1 service changed -> 4 services in the blast radius
+████████████████████████  4 of 4 other code services · depth 3
+Change  PR #7  merge commit a8899ac  2026-09-01  Merge pull request #7 from acme/catalogue-handler
+┌ Walk ────────────────────────────────┐┌ Reach ───────────────────────────────────────────────────┐
+│◆ catalogue  changed · 1 file         ││BY DEPTH                                                  │
+│├── ● cart  calls┌ Keys ────────────────────────────────────────────────────────┐██████████████ 3 │
+││   └── ● payment│1-4  Tab  Shift-Tab    switch tab                             │               1 │
+│├── ● ratings  ca│j/k  arrows            move, scroll                           │                 │
+│└── ● web  calls │PgUp/PgDn  g/G         page, top, bottom                      │                 │
+│                 │h/l  left/right        move between panes                     │               0 │
+│                 │/                      filter the list; Esc clears it         │██████████████ 4 │
+│                 │Enter                  blast radius of the service or change  │               0 │
+│                 │+ / -                  depth, on the Blast tab                │               0 │
+│                 │d  f                   diff range, files, on the Changes tab  │                 │
+│                 │Esc                    back to the tab that opened the blast  │                 │
+│                 │?                      this help                              │                 │
+│                 │q  Ctrl-C              quit                                   │static           │
+│                 │                                                              │                 │
+│                 │                                                              │                 │
+│                 └────────────────────────────────────────────── any key closes ┘                 │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+└──────────────────────────────────────┘└──────────────────────────────────────────────────────────┘
+Not in the computed blast radius - no static or observed runtime path found
+  0 services  (every other service is in the computed blast radius)
+j/k move · +/- depth · Esc back · ? help · q quit

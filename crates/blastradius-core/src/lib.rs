@@ -31,5 +31,7 @@ pub use graph::{BlastGraph, GraphError};
 pub use history::History;
 pub use map::MappingStats;
 pub use model::*;
-pub use report::{format_change_report, format_repo_report, format_report};
+pub use report::{
+    format_change_report, format_repo_report, format_report, hop_words, runtime_words,
+};
 pub use runtime::{RuntimeCall, RuntimeError, RuntimeGraph, RuntimeInput, RuntimeKind};

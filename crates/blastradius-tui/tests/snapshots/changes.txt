@@ -1,0 +1,30 @@
+acme/shop · 5 services · static only · depth 3 · 9 edges · 3 infrastructure
+ 1 Overview   2 Services   3 Changes   4 Blast
+CHANGE HISTORY  (last 2 PRs, 50 asked for, depth 3)
+Average 2.0 services · Median 2 · Largest PR #7 - 4 services · PRs reaching >10 0 (0%)
+┌ 2 changes ───────────────────────────────────────────────────────────────────────────────────────┐
+│REF DATE       FILES CHANGED REACHED          TITLE                                               │
+│#8  2026-09-01 1     1         0              web: tweak nginx (#8)                               │
+│#7  2026-09-01 1     1         4 ████████████ Merge pull request #7 from acme/catalogue-handler   │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+│                                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+j/k move · / filter · Enter blast radius · d diff · f files · ? help · q quit

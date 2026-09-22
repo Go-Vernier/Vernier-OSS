@@ -1,0 +1,30 @@
+acme/shop · 5 services · static only · depth 3 · 9 edges · 3 infrastructure
+ 1 Overview   2 Services   3 Changes   4 Blast
+┌ Services 8 ────────────────┐┌ cart ──────────────────────────────────────────────────────────────┐
+│NAME      LANGUAGE   IN  OUT││javascript · code · root cart · by docker-compose                   │
+│cart      javascript 2   2  ││declared  docker-compose.yml:7  build: ./cart                       │
+│catalogue go         3   1  ││package   cart                                                      │
+│payment   python     0   2  ││                                                                    │
+│ratings   php        1   1  ││payment ─┬─▶[ cart ]──┬─▶ catalogue                                 │
+│web       -          0   3  ││    web ─┘            └─▶ redis                                     │
+│mongodb   -          1   0  ││                                                                    │
+│rabbitmq  -          1   0  ││DIR SERVICE                                      TYPE     CONFIDENCE│
+│redis     -          1   0  ││out catalogue                                    http     static    │
+│                            ││out redis                                        database static    │
+│                            ││in  payment                                      http     static    │
+│                            ││in  web                                          http     uncertain │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││EVIDENCE  cart -> catalogue (http)                                  │
+│                            ││cart/server.js:2  CATALOGUE_HOST default catalogue                  │
+└────────────────────────────┘└────────────────────────────────────────────────────────────────────┘
+j/k move · h/l pane · / filter · Enter blast radius · ? help · q quit

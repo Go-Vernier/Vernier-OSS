@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/blastradius-core", "crates/blastradius-cli"]
+members = ["crates/blastradius-core", "crates/blastradius-cli", "crates/blastradius-tui"]
 
 [workspace.package]
 version = "0.0.1"
@@ -34,6 +34,7 @@ tree-sitter-go = "0.25"
 tree-sitter-java = "0.23"
 tree-sitter-c-sharp = "0.23"
 tree-sitter-php = "0.24"
+ratatui = "0.30"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

@@ -1,0 +1,30 @@
+acme/shop · 5 services · static only · depth 3 · 9 edges · 3 infrastructure
+ 1 Overview   2 Services   3 Changes   4 Blast
+┌ Services 8 ────────────────┐┌ payment ───────────────────────────────────────────────────────────┐
+│NAME      LANGUAGE   IN  OUT││python · code · root payment · by docker-compose                    │
+│cart      javascript 2   2  ││declared  docker-compose.yml:13  build: ./payment                   │
+│catalogue go         3   1  ││                                                                    │
+│payment   python     0   2  ││     [ payment ]──┬─▶ cart                                          │
+│ratings   php        1   1  ││                  └─▶ rabbitmq                                      │
+│web       -          0   3  ││                                                                    │
+│mongodb   -          1   0  ││DIR SERVICE                                      TYPE     CONFIDENCE│
+│rabbitmq  -          1   0  ││out cart                                         http     static    │
+│redis     -          1   0  ││out rabbitmq                                     event    static    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││                                                                    │
+│                            ││EVIDENCE  payment -> cart (http)                                    │
+│                            ││payment/payment.py:3  CART_HOST default cart                        │
+└────────────────────────────┘└────────────────────────────────────────────────────────────────────┘
+j/k move · h/l pane · / filter · Enter blast radius · ? help · q quit

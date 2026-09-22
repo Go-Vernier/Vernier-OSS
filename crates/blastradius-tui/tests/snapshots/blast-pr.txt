@@ -1,0 +1,30 @@
+acme/shop · 5 services · static only · depth 3 · 9 edges · 3 infrastructure
+ 1 Overview   2 Services   3 Changes   4 Blast
+1 service changed -> 4 services in the blast radius
+████████████████████████  4 of 4 other code services · depth 3
+Change  PR #7  merge commit a8899ac  2026-09-01  Merge pull request #7 from acme/catalogue-handler
+┌ Walk ────────────────────────────────┐┌ Reach ───────────────────────────────────────────────────┐
+│◆ catalogue  changed · 1 file         ││BY DEPTH                                                  │
+│├── ● cart  calls catalogue (http)    ││depth 1 ███████████████████████████████████████████████ 3 │
+││   └── ● payment  calls cart (http)  ││depth 2 ███████████████▊                                1 │
+│├── ● ratings  calls catalogue (http) ││                                                          │
+│└── ● web  calls catalogue (http)     ││BY CONFIDENCE                                             │
+│                                      ││observed                                                0 │
+│                                      ││static    █████████████████████████████████████████████ 4 │
+│                                      ││inferred                                                0 │
+│                                      ││uncertain                                               0 │
+│                                      ││                                                          │
+│                                      ││PATH TO  cart                                             │
+│                                      ││1. cart calls catalogue (http)                            │
+│                                      ││depth 1 · the weakest hop on the path is static           │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+│                                      ││                                                          │
+└──────────────────────────────────────┘└──────────────────────────────────────────────────────────┘
+Not in the computed blast radius - no static or observed runtime path found
+  0 services  (every other service is in the computed blast radius)
+j/k move · +/- depth · Esc back · ? help · q quit
