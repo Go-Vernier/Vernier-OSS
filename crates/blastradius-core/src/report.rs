@@ -214,9 +214,19 @@ fn row(label: &str, value: &str) -> String {
 }
 
 fn runtime_header(analysis: &Analysis, c: &Paint) -> String {
+    match runtime_words(analysis) {
+        None => c.dim("not connected - static only"),
+        Some((words, true)) => c.yellow(&words),
+        Some((words, false)) => words,
+    }
+}
+
+/// The Runtime row's words without colour, and whether the join is partial.
+/// None when no runtime source was joined.
+pub fn runtime_words(analysis: &Analysis) -> Option<(String, bool)> {
     let r = &analysis.runtime;
     let (Some(source), Some(services)) = (r.source, r.services) else {
-        return c.dim("not connected - static only");
+        return None;
     };
     let what = match r.input.as_deref() {
         Some(input) if input.starts_with("datadog env ") => {
@@ -230,12 +240,18 @@ fn runtime_header(analysis: &Analysis, c: &Paint) -> String {
     };
     // Names the user ignored on purpose are not a partial join.
     if services.matched + ignored_count(analysis) < services.runtime {
-        c.yellow(&format!(
-            "connected ({what}, {} of {} runtime services matched)",
-            services.matched, services.runtime
+        Some((
+            format!(
+                "connected ({what}, {} of {} runtime services matched)",
+                services.matched, services.runtime
+            ),
+            true,
         ))
     } else {
-        format!("connected ({what}, {} services matched)", services.matched)
+        Some((
+            format!("connected ({what}, {} services matched)", services.matched),
+            false,
+        ))
     }
 }
 
@@ -873,7 +889,7 @@ fn reached_table(reached: &[blast::Reached], c: &Paint) -> Vec<String> {
 }
 
 /// One hop, read from the reached service's side.
-fn hop_words(h: &Hop) -> String {
+pub fn hop_words(h: &Hop) -> String {
     match h.relation {
         Relation::Calls => match h.calls {
             Some(n) => format!(

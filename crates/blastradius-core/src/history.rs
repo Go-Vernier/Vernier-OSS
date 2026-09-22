@@ -3,8 +3,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::analyze::Analysis;
-use crate::blast;
-use crate::git::{self, GitError};
+use crate::blast::{self, Blast, Change};
+use crate::git::{self, Commit, GitError};
 
 /// What the history counts. Commits, when the log carries no pull request
 /// markers, and the report says so.
@@ -78,36 +78,47 @@ pub struct History {
 
 /// Runs the walk once per recent change and aggregates.
 pub fn run(analysis: &Analysis, n: usize, depth: usize) -> Result<History, GitError> {
+    let (unit, recent) = changes(analysis, n)?;
+    let entries = recent
+        .into_iter()
+        .map(|(commit, change)| entry(&commit, &blast::of_change(&analysis.graph, change, depth)))
+        .collect();
+    Ok(summarise(n, unit, depth, entries))
+}
+
+/// The recent changes the history walks, newest first, each with the commit
+/// it came from, and what they count.
+pub fn changes(analysis: &Analysis, n: usize) -> Result<(Unit, Vec<(Commit, Change)>), GitError> {
     let recent = git::recent(&analysis.root, n)?;
     let prefix = git::prefix(&analysis.root)?;
-    let mut entries: Vec<Entry> = Vec::new();
-    for commit in &recent.commits {
-        let mut change = git::commit_change(&analysis.root, &prefix, commit)?;
+    let mut out = Vec::with_capacity(recent.commits.len());
+    for commit in recent.commits {
+        let mut change = git::commit_change(&analysis.root, &prefix, &commit)?;
         if !recent.pull_requests {
             change.kind = blast::ChangeKind::Commit;
             change.reference.clone_from(&commit.short);
         }
-        let b = blast::of_change(&analysis.graph, change, depth);
-        entries.push(Entry {
-            reference: b.change.reference.clone(),
-            commit: commit.short.clone(),
-            date: commit.date.clone(),
-            title: commit.subject.clone(),
-            files: b.change.files.len(),
-            changed: b.summary.changed,
-            reached: b.summary.reached,
-        });
+        out.push((commit, change));
     }
-    Ok(summarise(
-        n,
-        if recent.pull_requests {
-            Unit::PullRequests
-        } else {
-            Unit::Commits
-        },
-        depth,
-        entries,
-    ))
+    let unit = if recent.pull_requests {
+        Unit::PullRequests
+    } else {
+        Unit::Commits
+    };
+    Ok((unit, out))
+}
+
+/// One history row: a commit and the blast radius of its change.
+pub fn entry(commit: &Commit, b: &Blast) -> Entry {
+    Entry {
+        reference: b.change.reference.clone(),
+        commit: commit.short.clone(),
+        date: commit.date.clone(),
+        title: commit.subject.clone(),
+        files: b.change.files.len(),
+        changed: b.summary.changed,
+        reached: b.summary.reached,
+    }
 }
 
 /// The numbers over the entries. Separate from `run` so it can be tested
