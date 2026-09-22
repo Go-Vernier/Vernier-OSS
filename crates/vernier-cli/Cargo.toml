@@ -1,0 +1,27 @@
+[package]
+name = "vernier-cli"
+description = "vernier command line"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "vernier"
+path = "src/main.rs"
+# The library of the same name carries the documentation.
+doc = false
+
+[dependencies]
+vernier-core = { path = "../vernier-core" }
+vernier-tui = { path = "../vernier-tui" }
+clap.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+
+[lints]
+workspace = true

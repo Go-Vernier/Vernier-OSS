@@ -143,56 +143,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ded4057c258ba199e2d26386d3af3780957ecaee6c4ef4041c6b4b8b97c0b06"
 
 [[package]]
-name = "blastradius-cli"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "blastradius-core",
- "blastradius-tui",
- "clap",
- "pretty_assertions",
- "serde_json",
-]
-
-[[package]]
-name = "blastradius-core"
-version = "0.0.1"
-dependencies = [
- "globset",
- "ignore",
- "indexmap",
- "libyaml-safer",
- "owo-colors",
- "pretty_assertions",
- "rayon",
- "regex",
- "serde",
- "serde_json",
- "strsim",
- "thiserror 2.0.20",
- "toml",
- "tree-sitter",
- "tree-sitter-c-sharp",
- "tree-sitter-go",
- "tree-sitter-java",
- "tree-sitter-javascript",
- "tree-sitter-php",
- "tree-sitter-python",
- "tree-sitter-typescript",
- "ureq",
-]
-
-[[package]]
-name = "blastradius-tui"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "blastradius-core",
- "pretty_assertions",
- "ratatui",
-]
-
-[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2124,6 +2074,56 @@ dependencies = [
  "getrandom 0.4.3",
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "vernier-cli"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "clap",
+ "pretty_assertions",
+ "serde_json",
+ "vernier-core",
+ "vernier-tui",
+]
+
+[[package]]
+name = "vernier-core"
+version = "0.0.1"
+dependencies = [
+ "globset",
+ "ignore",
+ "indexmap",
+ "libyaml-safer",
+ "owo-colors",
+ "pretty_assertions",
+ "rayon",
+ "regex",
+ "serde",
+ "serde_json",
+ "strsim",
+ "thiserror 2.0.20",
+ "toml",
+ "tree-sitter",
+ "tree-sitter-c-sharp",
+ "tree-sitter-go",
+ "tree-sitter-java",
+ "tree-sitter-javascript",
+ "tree-sitter-php",
+ "tree-sitter-python",
+ "tree-sitter-typescript",
+ "ureq",
+]
+
+[[package]]
+name = "vernier-tui"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "pretty_assertions",
+ "ratatui",
+ "vernier-core",
 ]
 
 [[package]]

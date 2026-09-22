@@ -239,7 +239,7 @@ sh scripts/corpus.sh                      # shallow-clone the eight reference re
 cargo test --test corpus -- --nocapture   # discovery counts and timing on the corpus
 cargo run -q -- analyze corpus/robot-shop --files cart/server.js --html /tmp/robot-shop.html
 cargo run -q -- tui corpus/train-ticket
-UPDATE_SNAPSHOTS=1 cargo test -p blastradius-tui   # rewrite the TUI's text snapshots after a deliberate change
+UPDATE_SNAPSHOTS=1 cargo test -p vernier-tui   # rewrite the TUI's text snapshots after a deliberate change
 ```
 
 Every change should run against the whole corpus. A regression on one repo
@@ -248,10 +248,10 @@ services per repository; `test/expected/discovery/` holds the output the
 original TypeScript engine produced on every fixture, which the Rust engine
 must reproduce.
 
-The `blastradius-core` crate is also a library:
+The `vernier-core` crate is also a library:
 
 ```rust
-use blastradius::{analyze, blast, format_report, Change};
+use vernier::{analyze, blast, format_report, Change};
 
 let mut analysis = analyze(std::path::Path::new("./my-repo"))?;
 let change = Change::from_files(&["services/checkout/src/pay.ts".to_string()]);

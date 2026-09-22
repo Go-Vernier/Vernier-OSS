@@ -1,4 +1,4 @@
-# Blast Radius — Open Source Build Spec
+# Vernier — Open Source Build Spec
 
 Phase 0. A CLI that analyses a repository and reports what a change can
 reach. No accounts, no hosted service, no GitHub App.
@@ -10,11 +10,11 @@ reach. No accounts, no hosted service, no GitHub App.
 ## What it must do
 
 ```bash
-npx blast-radius analyze .              # full repo report
-npx blast-radius analyze . --pr 481     # blast radius of one PR
-npx blast-radius analyze . --history 50 # blast radius of last 50 PRs
-npx blast-radius analyze . --otel <url> # join with runtime traces
-npx blast-radius analyze . --html out.html
+npx vernier analyze .              # full repo report
+npx vernier analyze . --pr 481     # blast radius of one PR
+npx vernier analyze . --history 50 # blast radius of last 50 PRs
+npx vernier analyze . --otel <url> # join with runtime traces
+npx vernier analyze . --html out.html
 ```
 
 ---
@@ -111,7 +111,7 @@ in the repo. Implement in this order:
 1. Exact match
 2. Normalised match (lowercase, strip `-api`, `-svc`, `-service`)
 3. Fuzzy match above a similarity threshold, reported as a warning
-4. Manual mapping via optional `blast-radius.config.json`
+4. Manual mapping via optional `vernier.config.json`
 
 Print the mapping result explicitly. If only six of forty-two services
 matched, say so loudly — a silent partial join produces a confidently
@@ -259,7 +259,7 @@ It should open with the finding, not the installation instructions:
 >
 > Run it on yours:
 > ```
-> npx blast-radius analyze .
+> npx vernier analyze .
 > ```
 
 That framing is what gets it posted. The tool is how someone reproduces

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/blastradius-core", "crates/blastradius-cli", "crates/blastradius-tui"]
+members = ["crates/vernier-core", "crates/vernier-cli", "crates/vernier-tui"]
 
 [workspace.package]
 version = "0.0.1"

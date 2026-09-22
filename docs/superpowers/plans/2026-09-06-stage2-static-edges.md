@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** `blast-radius analyze` reports HTTP and gRPC edges between discovered services, each with file-and-line evidence and a confidence label, validated against the documented call graphs of microservices-demo, robot-shop and eShop.
+**Goal:** `vernier analyze` reports HTTP and gRPC edges between discovered services, each with file-and-line evidence and a confidence label, validated against the documented call graphs of microservices-demo, robot-shop and eShop.
 
-**Architecture:** Three layers under `crates/blastradius-core/src/map/`. `facts` turns one file into language-neutral facts (strings, templates, calls, imports, annotations, base types, environment references) through tree-sitter for seven languages and a regex extractor for everything else including config files. `matchers` turn facts into candidates that name what they found (a host, an environment variable, a proto service). `resolve` turns candidates into edges against an index of discovered services and their configured environment. `map::run` owns files by service root, fans out over rayon, merges duplicate edges and fills the `mapping` block of the JSON.
+**Architecture:** Three layers under `crates/vernier-core/src/map/`. `facts` turns one file into language-neutral facts (strings, templates, calls, imports, annotations, base types, environment references) through tree-sitter for seven languages and a regex extractor for everything else including config files. `matchers` turn facts into candidates that name what they found (a host, an environment variable, a proto service). `resolve` turns candidates into edges against an index of discovered services and their configured environment. `map::run` owns files by service root, fans out over rayon, merges duplicate edges and fills the `mapping` block of the JSON.
 
 **Tech Stack:** tree-sitter 0.27 with tree-sitter-javascript 0.25, -typescript 0.23, -python 0.25, -go 0.25, -java 0.23, -c-sharp 0.23, -php 0.24; rayon 1; regex; existing yaml and fs modules.
 
@@ -24,20 +24,20 @@
 ## File Structure
 
 ```
-crates/blastradius-core/Cargo.toml              + tree-sitter*, rayon
-crates/blastradius-core/src/map/mod.rs          run(): ownership, fan-out, merge, MappingStats; pub types Candidate, Target
-crates/blastradius-core/src/map/facts/mod.rs    Fact, Part, Arg, Language detection by extension, extract(path, text) -> Extraction
-crates/blastradius-core/src/map/facts/treesitter.rs  per-language node tables and the tree walk
-crates/blastradius-core/src/map/facts/regex.rs  strings, ${VAR}, env lookups, imports for unknown languages and config files
-crates/blastradius-core/src/map/config.rs       ConfigIndex: compose/k8s env per service, ConfigMaps, dotenv, proto services
-crates/blastradius-core/src/map/resolve.rs      Resolver: Target -> Option<Resolved>, host classification, normalisation
-crates/blastradius-core/src/map/matchers/mod.rs Matcher trait, all()
-crates/blastradius-core/src/map/matchers/http.rs
-crates/blastradius-core/src/map/matchers/grpc.rs
-crates/blastradius-core/src/analyze.rs          + mapping field, calls map::run
-crates/blastradius-core/src/report.rs           STRUCTURE with counts, EDGES table, FINDINGS
-crates/blastradius-core/tests/edges.rs          fixture tests for http, grpc, resolver confidence
-crates/blastradius-core/tests/corpus.rs         + expected edges, minimum recall, unresolved report
+crates/vernier-core/Cargo.toml              + tree-sitter*, rayon
+crates/vernier-core/src/map/mod.rs          run(): ownership, fan-out, merge, MappingStats; pub types Candidate, Target
+crates/vernier-core/src/map/facts/mod.rs    Fact, Part, Arg, Language detection by extension, extract(path, text) -> Extraction
+crates/vernier-core/src/map/facts/treesitter.rs  per-language node tables and the tree walk
+crates/vernier-core/src/map/facts/regex.rs  strings, ${VAR}, env lookups, imports for unknown languages and config files
+crates/vernier-core/src/map/config.rs       ConfigIndex: compose/k8s env per service, ConfigMaps, dotenv, proto services
+crates/vernier-core/src/map/resolve.rs      Resolver: Target -> Option<Resolved>, host classification, normalisation
+crates/vernier-core/src/map/matchers/mod.rs Matcher trait, all()
+crates/vernier-core/src/map/matchers/http.rs
+crates/vernier-core/src/map/matchers/grpc.rs
+crates/vernier-core/src/analyze.rs          + mapping field, calls map::run
+crates/vernier-core/src/report.rs           STRUCTURE with counts, EDGES table, FINDINGS
+crates/vernier-core/tests/edges.rs          fixture tests for http, grpc, resolver confidence
+crates/vernier-core/tests/corpus.rs         + expected edges, minimum recall, unresolved report
 test/fixtures/edges-http-app/                   compose + env + 4 services in js, py, go, php + nginx template
 test/fixtures/edges-grpc-app/                   k8s manifests + proto + go server, py client, cs client
 test/expected/corpus/{microservices-demo,robot-shop,eshop}.json  + "edges": [...]
@@ -48,7 +48,7 @@ test/expected/corpus/{microservices-demo,robot-shop,eshop}.json  + "edges": [...
 ### Task B1: Facts layer with tree-sitter and regex extractors
 
 **Files:**
-- Modify: `crates/blastradius-core/Cargo.toml`, `Cargo.toml` (workspace deps), `crates/blastradius-core/src/lib.rs` (add `pub mod map;`)
+- Modify: `crates/vernier-core/Cargo.toml`, `Cargo.toml` (workspace deps), `crates/vernier-core/src/lib.rs` (add `pub mod map;`)
 - Create: `src/map/mod.rs` (module declarations only for now), `src/map/facts/mod.rs`, `src/map/facts/treesitter.rs`, `src/map/facts/regex.rs`
 
 **Interfaces:**
@@ -185,7 +185,7 @@ mod tests {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cargo test -p blastradius-core map::facts`
+Run: `cargo test -p vernier-core map::facts`
 Expected: compile error.
 
 - [ ] **Step 3: Add dependencies**
@@ -260,13 +260,13 @@ For each line (1-based):
 
 - [ ] **Step 7: Run tests, fmt, clippy**
 
-Run: `cargo test -p blastradius-core map::facts && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run: `cargo test -p vernier-core map::facts && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
 Expected: 5 passed. The first tree-sitter build takes a minute.
 
 - [ ] **Step 8: Commit**
 
 ```bash
-git add Cargo.toml Cargo.lock crates/blastradius-core
+git add Cargo.toml Cargo.lock crates/vernier-core
 git commit -m "feat(map): language-neutral facts from tree-sitter and a regex fallback"
 ```
 
@@ -302,7 +302,7 @@ impl ConfigIndex {
 #[test]
 fn compose_environment_per_service_and_dotenv_global() {
     let root = fixture("edges-http-app"); let index = FileIndex::build(&root);
-    let services = blastradius::discover::discover_services(&root, &index).services;
+    let services = vernier::discover::discover_services(&root, &index).services;
     let cfg = ConfigIndex::build(&root, &index, &services);
     let v = cfg.lookup("web", "CATALOGUE_HOST").unwrap();
     assert_eq!(v.value, "catalogue");
@@ -315,7 +315,7 @@ fn compose_environment_per_service_and_dotenv_global() {
 #[test]
 fn kubernetes_env_configmaps_and_protos() {
     let root = fixture("edges-grpc-app"); let index = FileIndex::build(&root);
-    let services = blastradius::discover::discover_services(&root, &index).services;
+    let services = vernier::discover::discover_services(&root, &index).services;
     let cfg = ConfigIndex::build(&root, &index, &services);
     assert_eq!(cfg.lookup("frontend", "CART_SERVICE_ADDR").map(|v| v.value.as_str()), Some("cartservice:7070"));
     assert_eq!(cfg.lookup("frontend", "FROM_CONFIGMAP").map(|v| v.value.as_str()), Some("emailservice:5000"));
@@ -330,7 +330,7 @@ fn kubernetes_env_configmaps_and_protos() {
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core/src/map/config.rs test/fixtures
+git add crates/vernier-core/src/map/config.rs test/fixtures
 git commit -m "feat(map): configuration index of environment values and proto services"
 ```
 
@@ -452,7 +452,7 @@ fn templates_and_protos() {
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core/src/map
+git add crates/vernier-core/src/map
 git commit -m "feat(map): resolver from hosts, variables, templates and protos to services"
 ```
 
@@ -461,7 +461,7 @@ git commit -m "feat(map): resolver from hosts, variables, templates and protos t
 ### Task B4: Fixtures, HTTP matcher, gRPC matcher, and the map stage
 
 **Files:**
-- Create: `test/fixtures/edges-http-app/**`, `test/fixtures/edges-grpc-app/**`, `src/map/matchers/mod.rs`, `src/map/matchers/http.rs`, `src/map/matchers/grpc.rs`, `crates/blastradius-core/tests/edges.rs`
+- Create: `test/fixtures/edges-http-app/**`, `test/fixtures/edges-grpc-app/**`, `src/map/matchers/mod.rs`, `src/map/matchers/http.rs`, `src/map/matchers/grpc.rs`, `crates/vernier-core/tests/edges.rs`
 - Modify: `src/map/mod.rs` (`run`), `src/analyze.rs` (mapping field, call `map::run`), `src/lib.rs`
 
 **Interfaces:**
@@ -605,7 +605,7 @@ src/checkoutservice/go.mod  src/checkoutservice/main.go   pb.NewEmailServiceClie
 
 ```rust
 mod common;
-use blastradius::*;
+use vernier::*;
 use common::fixture;
 use pretty_assertions::assert_eq;
 use std::collections::BTreeSet;
@@ -641,8 +641,8 @@ fn http_edges_from_literals_env_templates_and_config_files() {
     assert!(!edges.iter().any(|e| e.target == "paypal.com" || e.source == e.target));
     assert!(json.mapping.unresolved_targets.contains(&"USER_HOST".to_string()), "{:?}", json.mapping.unresolved_targets);
     assert!(json.mapping.files_scanned >= 5);
-    assert_eq!(json.mapping.parsers.get("template").copied(), Some(blastradius::map::facts::Parser::Regex));
-    assert_eq!(json.mapping.parsers.get("go").copied(), Some(blastradius::map::facts::Parser::TreeSitter));
+    assert_eq!(json.mapping.parsers.get("template").copied(), Some(vernier::map::facts::Parser::Regex));
+    assert_eq!(json.mapping.parsers.get("go").copied(), Some(vernier::map::facts::Parser::TreeSitter));
 }
 
 #[test]
@@ -684,7 +684,7 @@ Parity note: the parity JSON files under `test/expected/discovery/` do not have 
 - [ ] **Step 6: fmt, clippy, commit**
 
 ```bash
-git add crates/blastradius-core test/fixtures
+git add crates/vernier-core test/fixtures
 git commit -m "feat(map): http and grpc edges with evidence, confidence and the mapping block"
 ```
 
@@ -756,7 +756,7 @@ Rules: EDGES rows sorted as in the JSON, evidence column is the first evidence's
 - [ ] **Step 4: Run tests, fmt, clippy**, **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core
+git add crates/vernier-core
 git commit -m "feat(report): structure counts, edges table and findings"
 ```
 
@@ -765,7 +765,7 @@ git commit -m "feat(report): structure counts, edges table and findings"
 ### Task B6: Corpus edges, recall check, and fixes
 
 **Files:**
-- Modify: `test/expected/corpus/microservices-demo.json`, `robot-shop.json`, `eshop.json`, `crates/blastradius-core/tests/corpus.rs`
+- Modify: `test/expected/corpus/microservices-demo.json`, `robot-shop.json`, `eshop.json`, `crates/vernier-core/tests/corpus.rs`
 
 - [ ] **Step 1: Add expected edges from the documented architectures**
 
@@ -829,7 +829,7 @@ git commit -m "feat(report): structure counts, edges table and findings"
 
 - [ ] **Step 3: Run and fix recall failures**
 
-Run: `cargo test -p blastradius-core --test corpus -- --nocapture`
+Run: `cargo test -p vernier-core --test corpus -- --nocapture`
 
 Work through every missing edge by reading the corpus source at the place the architecture says the call happens, then fix the extractor or matcher, never the expected file, unless the architecture note was wrong. Likely gaps and where they land: shipping's `application.properties` uses `${DB_HOST:mysql}` style defaults (regex extractor Template with `Var("DB_HOST:mysql")`, resolver `env_default`); dispatch's Go default `"rabbitmq"` is a bare infrastructure name (http matcher bare-name rule); robot-shop `web` has no compose environment, so its nginx edges are Uncertain by name; eShop `Basket.API` is `http://basket-api` inside `AddGrpcClient<Basket.BasketClient>` (grpc matcher `X.YClient` rule with `X` = `Basket`, resolved by normalised name since eShop has protos under `src/Basket.API/Proto/basket.proto`).
 
@@ -838,7 +838,7 @@ Work through every missing edge by reading the corpus source at the place the ar
 - [ ] **Step 5: Commit**
 
 ```bash
-git add test/expected crates/blastradius-core/tests/corpus.rs crates/blastradius-core/src
+git add test/expected crates/vernier-core/tests/corpus.rs crates/vernier-core/src
 git commit -m "test(corpus): expected http and grpc edges for microservices-demo, robot-shop and eShop"
 ```
 

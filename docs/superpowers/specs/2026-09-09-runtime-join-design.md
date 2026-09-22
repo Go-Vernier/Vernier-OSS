@@ -206,18 +206,18 @@ error: a file the user wrote must not be silently skipped.
 ## Architecture
 
 ```
-crates/blastradius-core/src/runtime/mod.rs        RuntimeSource, RuntimeKind, RuntimeCall, RuntimeGraph, RuntimeJoin; load(input) and join(analysis)
-crates/blastradius-core/src/runtime/prometheus.rs parse(text) -> RuntimeGraph
-crates/blastradius-core/src/runtime/otlp.rs       parse(text) -> RuntimeGraph
-crates/blastradius-core/src/runtime/datadog.rs    parse(text) -> RuntimeGraph; request URL and headers
-crates/blastradius-core/src/runtime/fetch.rs      read(input) -> String: file or URL (ureq), Datadog live call
-crates/blastradius-core/src/runtime/matching.rs   match_names(runtime services, discovered services, config) -> Vec<Mapping>
-crates/blastradius-core/src/runtime/merge.rs      apply(graph, calls, mapping) -> counts; edge promotion and new edges
-crates/blastradius-core/src/config.rs             vernier.config.json
-crates/blastradius-core/src/model.rs              Edge.observed
-crates/blastradius-core/src/analyze.rs            Runtime replaced by RuntimeJoin (serialises to the block above)
-crates/blastradius-core/src/report.rs             header, RUNTIME section, FINDINGS line
-crates/blastradius-cli/src/main.rs                --otel, --datadog, --dd-env, --dd-site
+crates/vernier-core/src/runtime/mod.rs        RuntimeSource, RuntimeKind, RuntimeCall, RuntimeGraph, RuntimeJoin; load(input) and join(analysis)
+crates/vernier-core/src/runtime/prometheus.rs parse(text) -> RuntimeGraph
+crates/vernier-core/src/runtime/otlp.rs       parse(text) -> RuntimeGraph
+crates/vernier-core/src/runtime/datadog.rs    parse(text) -> RuntimeGraph; request URL and headers
+crates/vernier-core/src/runtime/fetch.rs      read(input) -> String: file or URL (ureq), Datadog live call
+crates/vernier-core/src/runtime/matching.rs   match_names(runtime services, discovered services, config) -> Vec<Mapping>
+crates/vernier-core/src/runtime/merge.rs      apply(graph, calls, mapping) -> counts; edge promotion and new edges
+crates/vernier-core/src/config.rs             vernier.config.json
+crates/vernier-core/src/model.rs              Edge.observed
+crates/vernier-core/src/analyze.rs            Runtime replaced by RuntimeJoin (serialises to the block above)
+crates/vernier-core/src/report.rs             header, RUNTIME section, FINDINGS line
+crates/vernier-cli/src/main.rs                --otel, --datadog, --dd-env, --dd-site
 ```
 
 `analyze(root)` keeps its signature. The CLI calls `analyze`, then
@@ -249,7 +249,7 @@ The library exposes the same two calls.
 
 ## Out of scope
 
-The blast-radius walk (Stage 4), the HTML report, a `fetch` subcommand that
+The vernier walk (Stage 4), the HTML report, a `fetch` subcommand that
 saves a snapshot, historical windows and "last observed" dates (neither
 source above carries them), Jaeger and Tempo APIs, sampling correction.
 
@@ -293,5 +293,5 @@ source above carries them), Jaeger and Tempo APIs, sampling correction.
 - The command is `vernier` (`vernier analyze . --otel traces.prom`), the report
   banner is `VERNIER` and the config file is `vernier.config.json`: the CLI
   is Vernier's open-source part, and "blast radius" names the number it
-  reports, not the tool. Crate names (`blastradius-core`, `blastradius-cli`)
+  reports, not the tool. Crate names (`vernier-core`, `vernier-cli`)
   and the reserved npm name are unchanged; they are not user-facing.

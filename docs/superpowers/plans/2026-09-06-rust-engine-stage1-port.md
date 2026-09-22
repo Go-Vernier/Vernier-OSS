@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** A Rust workspace whose `blast-radius analyze <path> --json` prints exactly what the TypeScript engine prints for every fixture and every corpus repository, after which the TypeScript engine is removed.
+**Goal:** A Rust workspace whose `vernier analyze <path> --json` prints exactly what the TypeScript engine prints for every fixture and every corpus repository, after which the TypeScript engine is removed.
 
-**Architecture:** Two crates. `blastradius-core` is a library: file index, marked YAML loader, the four discovery strategies plus the fallback, the graph, `analyze`, and the terminal report. `blastradius-cli` is the `blast-radius` binary built on clap. One file walk feeds every strategy. The JSON contract is the TypeScript `AnalysisJSON`, field for field.
+**Architecture:** Two crates. `vernier-core` is a library: file index, marked YAML loader, the four discovery strategies plus the fallback, the graph, `analyze`, and the terminal report. `vernier-cli` is the `vernier` binary built on clap. One file walk feeds every strategy. The JSON contract is the TypeScript `AnalysisJSON`, field for field.
 
 **Tech Stack:** Rust 1.98 (edition 2024), serde + serde_json, yaml-rust2 (event parser, own marked tree), toml, ignore + globset (walk and glob), regex, clap 4, owo-colors, pretty_assertions.
 
@@ -26,30 +26,30 @@
 ```
 Cargo.toml                                   workspace, shared deps, lints
 .gitignore                                   + target/
-crates/blastradius-core/Cargo.toml
-crates/blastradius-core/src/lib.rs           module list and re-exports
-crates/blastradius-core/src/model.rs         Confidence, Evidence, Service, Edge, enums (serde)
-crates/blastradius-core/src/fs.rs            FileIndex: one walk, rel paths, glob filters, read helpers
-crates/blastradius-core/src/yaml.rs          marked YAML tree from yaml-rust2 events; anchors, aliases, merge keys
-crates/blastradius-core/src/discover/mod.rs  discover_services: strategy order, fallback, sorting
-crates/blastradius-core/src/discover/env.rs  dotenv parse, compose interpolation
-crates/blastradius-core/src/discover/language.rs  manifests, language, entry points, packageName
-crates/blastradius-core/src/discover/directories.rs  DirectoryIndex tiers, normalise, image_basename
-crates/blastradius-core/src/discover/compose.rs
-crates/blastradius-core/src/discover/kubernetes.rs
-crates/blastradius-core/src/discover/monorepo.rs
-crates/blastradius-core/src/discover/workspace.rs
-crates/blastradius-core/src/graph.rs         BlastGraph: services by name, edges, inbound/outbound
-crates/blastradius-core/src/analyze.rs       Analysis, analyze(), repository_name(), AnalysisJson
-crates/blastradius-core/src/report.rs        format_repo_report(&Analysis, color)
-crates/blastradius-core/tests/common/mod.rs  fixture(name) -> PathBuf, by_name()
-crates/blastradius-core/tests/discovery.rs   port of test/discover.test.ts
-crates/blastradius-core/tests/analyze.rs     port of test/analyze.test.ts + graph tests
-crates/blastradius-core/tests/parity.rs      test/expected/discovery/*.json vs Rust output
-crates/blastradius-core/tests/corpus.rs      test/expected/corpus/*.json vs Rust output; skips without corpus/
-crates/blastradius-cli/Cargo.toml
-crates/blastradius-cli/src/main.rs           clap: analyze [path] --json --no-color
-crates/blastradius-cli/tests/cli.rs          runs the binary on fixtures
+crates/vernier-core/Cargo.toml
+crates/vernier-core/src/lib.rs           module list and re-exports
+crates/vernier-core/src/model.rs         Confidence, Evidence, Service, Edge, enums (serde)
+crates/vernier-core/src/fs.rs            FileIndex: one walk, rel paths, glob filters, read helpers
+crates/vernier-core/src/yaml.rs          marked YAML tree from yaml-rust2 events; anchors, aliases, merge keys
+crates/vernier-core/src/discover/mod.rs  discover_services: strategy order, fallback, sorting
+crates/vernier-core/src/discover/env.rs  dotenv parse, compose interpolation
+crates/vernier-core/src/discover/language.rs  manifests, language, entry points, packageName
+crates/vernier-core/src/discover/directories.rs  DirectoryIndex tiers, normalise, image_basename
+crates/vernier-core/src/discover/compose.rs
+crates/vernier-core/src/discover/kubernetes.rs
+crates/vernier-core/src/discover/monorepo.rs
+crates/vernier-core/src/discover/workspace.rs
+crates/vernier-core/src/graph.rs         BlastGraph: services by name, edges, inbound/outbound
+crates/vernier-core/src/analyze.rs       Analysis, analyze(), repository_name(), AnalysisJson
+crates/vernier-core/src/report.rs        format_repo_report(&Analysis, color)
+crates/vernier-core/tests/common/mod.rs  fixture(name) -> PathBuf, by_name()
+crates/vernier-core/tests/discovery.rs   port of test/discover.test.ts
+crates/vernier-core/tests/analyze.rs     port of test/analyze.test.ts + graph tests
+crates/vernier-core/tests/parity.rs      test/expected/discovery/*.json vs Rust output
+crates/vernier-core/tests/corpus.rs      test/expected/corpus/*.json vs Rust output; skips without corpus/
+crates/vernier-cli/Cargo.toml
+crates/vernier-cli/src/main.rs           clap: analyze [path] --json --no-color
+crates/vernier-cli/tests/cli.rs          runs the binary on fixtures
 test/expected/discovery/<fixture>.json       TypeScript baseline (copied from scratchpad/baseline/fixtures)
 test/expected/corpus/<repo>.json             strategy + code/infra service names per corpus repo
 .github/workflows/ci.yml                     cargo jobs on ubuntu + macos
@@ -67,7 +67,7 @@ Task 14 copies them into `test/expected/`. If that directory is gone, regenerate
 ### Task 1: Workspace scaffold and the data model
 
 **Files:**
-- Create: `Cargo.toml`, `crates/blastradius-core/Cargo.toml`, `crates/blastradius-core/src/lib.rs`, `crates/blastradius-core/src/model.rs`, `crates/blastradius-cli/Cargo.toml`, `crates/blastradius-cli/src/main.rs`
+- Create: `Cargo.toml`, `crates/vernier-core/Cargo.toml`, `crates/vernier-core/src/lib.rs`, `crates/vernier-core/src/model.rs`, `crates/vernier-cli/Cargo.toml`, `crates/vernier-cli/src/main.rs`
 - Modify: `.gitignore`
 
 **Interfaces:**
@@ -79,7 +79,7 @@ Task 14 copies them into `test/expected/`. If that directory is gone, regenerate
 ```toml
 [workspace]
 resolver = "2"
-members = ["crates/blastradius-core", "crates/blastradius-cli"]
+members = ["crates/vernier-core", "crates/vernier-cli"]
 
 [workspace.package]
 version = "0.0.1"
@@ -117,10 +117,10 @@ codegen-units = 1
 strip = true
 ```
 
-`crates/blastradius-core/Cargo.toml`:
+`crates/vernier-core/Cargo.toml`:
 ```toml
 [package]
-name = "blastradius-core"
+name = "vernier-core"
 description = "Which services can this change reach? Service discovery and dependency mapping for multi-service repositories."
 version.workspace = true
 edition.workspace = true
@@ -129,7 +129,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [lib]
-name = "blastradius"
+name = "vernier"
 path = "src/lib.rs"
 
 [dependencies]
@@ -151,11 +151,11 @@ pretty_assertions.workspace = true
 workspace = true
 ```
 
-`crates/blastradius-cli/Cargo.toml`:
+`crates/vernier-cli/Cargo.toml`:
 ```toml
 [package]
-name = "blastradius-cli"
-description = "blast-radius command line"
+name = "vernier-cli"
+description = "vernier command line"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -163,11 +163,11 @@ repository.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "blast-radius"
+name = "vernier"
 path = "src/main.rs"
 
 [dependencies]
-blastradius-core = { path = "../blastradius-core" }
+vernier-core = { path = "../vernier-core" }
 clap.workspace = true
 serde_json.workspace = true
 anyhow.workspace = true
@@ -183,7 +183,7 @@ Append `target/` to `.gitignore`.
 
 - [ ] **Step 2: Write the failing model test**
 
-`crates/blastradius-core/src/model.rs` starts with only the test module so it fails to compile:
+`crates/vernier-core/src/model.rs` starts with only the test module so it fails to compile:
 ```rust
 #[cfg(test)]
 mod tests {
@@ -228,7 +228,7 @@ mod tests {
 
 - [ ] **Step 3: Run it to verify it fails**
 
-Run: `cargo test -p blastradius-core model`
+Run: `cargo test -p vernier-core model`
 Expected: compile error, `Service` not found.
 
 - [ ] **Step 4: Write the model**
@@ -336,14 +336,14 @@ pub mod model;
 pub use model::*;
 ```
 
-`crates/blastradius-cli/src/main.rs` for now:
+`crates/vernier-cli/src/main.rs` for now:
 ```rust
-fn main() { println!("blast-radius"); }
+fn main() { println!("vernier"); }
 ```
 
 - [ ] **Step 5: Run tests, fmt, clippy**
 
-Run: `cargo test -p blastradius-core && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run: `cargo test -p vernier-core && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
 Expected: 2 passed, no warnings.
 
 - [ ] **Step 6: Commit**
@@ -358,8 +358,8 @@ git commit -m "feat(rust): workspace scaffold and the data model"
 ### Task 2: File index
 
 **Files:**
-- Create: `crates/blastradius-core/src/fs.rs`
-- Modify: `crates/blastradius-core/src/lib.rs` (add `pub mod fs;`)
+- Create: `crates/vernier-core/src/fs.rs`
+- Modify: `crates/vernier-core/src/lib.rs` (add `pub mod fs;`)
 - Test: inline unit tests using `test/fixtures/compose-app`
 
 **Interfaces:**
@@ -429,7 +429,7 @@ mod tests {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cargo test -p blastradius-core fs::`
+Run: `cargo test -p vernier-core fs::`
 Expected: compile error.
 
 - [ ] **Step 3: Implement**
@@ -445,13 +445,13 @@ Rules:
 
 - [ ] **Step 4: Run tests, fmt, clippy**
 
-Run: `cargo test -p blastradius-core fs:: && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run: `cargo test -p vernier-core fs:: && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
 Expected: 3 passed.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core/src
+git add crates/vernier-core/src
 git commit -m "feat(rust): file index with one walk and glob filters"
 ```
 
@@ -460,7 +460,7 @@ git commit -m "feat(rust): file index with one walk and glob filters"
 ### Task 3: Marked YAML loader
 
 **Files:**
-- Create: `crates/blastradius-core/src/yaml.rs`
+- Create: `crates/vernier-core/src/yaml.rs`
 - Modify: `lib.rs` (add `pub mod yaml;`)
 
 **Interfaces:**
@@ -532,7 +532,7 @@ mod tests {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cargo test -p blastradius-core yaml::`
+Run: `cargo test -p vernier-core yaml::`
 
 - [ ] **Step 3: Implement**
 
@@ -555,12 +555,12 @@ struct Loader { docs: Vec<Node>, stack: Vec<Frame>, anchors: HashMap<usize, Node
 
 - [ ] **Step 4: Run tests, fmt, clippy**
 
-Run: `cargo test -p blastradius-core yaml:: && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run: `cargo test -p vernier-core yaml:: && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core/src
+git add crates/vernier-core/src
 git commit -m "feat(rust): marked YAML loader with anchors and merge keys"
 ```
 
@@ -569,7 +569,7 @@ git commit -m "feat(rust): marked YAML loader with anchors and merge keys"
 ### Task 4: Compose environment
 
 **Files:**
-- Create: `crates/blastradius-core/src/discover/mod.rs` (module declarations only for now), `crates/blastradius-core/src/discover/env.rs`
+- Create: `crates/vernier-core/src/discover/mod.rs` (module declarations only for now), `crates/vernier-core/src/discover/env.rs`
 - Modify: `lib.rs` (add `pub mod discover;`)
 
 **Interfaces:**
@@ -623,7 +623,7 @@ Check `test/fixtures/compose-env-app/.env` for the real key names and assert on 
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cargo test -p blastradius-core env::`
+Run: `cargo test -p vernier-core env::`
 
 - [ ] **Step 3: Implement**
 
@@ -637,7 +637,7 @@ Run: `cargo test -p blastradius-core env::`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core/src
+git add crates/vernier-core/src
 git commit -m "feat(rust): dotenv parsing and compose interpolation"
 ```
 
@@ -646,7 +646,7 @@ git commit -m "feat(rust): dotenv parsing and compose interpolation"
 ### Task 5: Language and manifest detection
 
 **Files:**
-- Create: `crates/blastradius-core/src/discover/language.rs`
+- Create: `crates/vernier-core/src/discover/language.rs`
 
 **Interfaces:**
 - Produces:
@@ -707,7 +707,7 @@ Port `src/discover/language.ts` exactly:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core/src
+git add crates/vernier-core/src
 git commit -m "feat(rust): manifest, language and entry point detection"
 ```
 
@@ -716,7 +716,7 @@ git commit -m "feat(rust): manifest, language and entry point detection"
 ### Task 6: Directory index and name normalisation
 
 **Files:**
-- Create: `crates/blastradius-core/src/discover/directories.rs`
+- Create: `crates/vernier-core/src/discover/directories.rs`
 
 **Interfaces:**
 - Produces:
@@ -786,7 +786,7 @@ Port `src/discover/directories.ts`:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core/src
+git add crates/vernier-core/src
 git commit -m "feat(rust): directory index with tiered name matching"
 ```
 
@@ -795,8 +795,8 @@ git commit -m "feat(rust): directory index with tiered name matching"
 ### Task 7: docker-compose strategy and the discovery runner
 
 **Files:**
-- Create: `crates/blastradius-core/src/discover/compose.rs`, `crates/blastradius-core/tests/common/mod.rs`, `crates/blastradius-core/tests/discovery.rs`
-- Modify: `crates/blastradius-core/src/discover/mod.rs`
+- Create: `crates/vernier-core/src/discover/compose.rs`, `crates/vernier-core/tests/common/mod.rs`, `crates/vernier-core/tests/discovery.rs`
+- Modify: `crates/vernier-core/src/discover/mod.rs`
 
 **Interfaces:**
 - Produces:
@@ -817,7 +817,7 @@ git commit -m "feat(rust): directory index with tiered name matching"
 
 `tests/common/mod.rs`:
 ```rust
-use blastradius::{Service, discover::DiscoveryResult, fs::FileIndex};
+use vernier::{Service, discover::DiscoveryResult, fs::FileIndex};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
@@ -827,7 +827,7 @@ pub fn fixture(name: &str) -> PathBuf {
 pub fn discover(name: &str) -> DiscoveryResult {
     let root = fixture(name);
     let index = FileIndex::build(&root);
-    blastradius::discover::discover_services(&root, &index)
+    vernier::discover::discover_services(&root, &index)
 }
 pub fn by_name(services: &[Service]) -> BTreeMap<String, Service> {
     services.iter().map(|s| (s.name.clone(), s.clone())).collect()
@@ -837,7 +837,7 @@ pub fn by_name(services: &[Service]) -> BTreeMap<String, Service> {
 `tests/discovery.rs`, compose part:
 ```rust
 mod common;
-use blastradius::*;
+use vernier::*;
 use common::{by_name, discover};
 use pretty_assertions::assert_eq;
 
@@ -925,7 +925,7 @@ fn compose_keeps_deploy_only_images() {
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cargo test -p blastradius-core --test discovery`
+Run: `cargo test -p vernier-core --test discovery`
 Expected: compile error, `discover_services` missing.
 
 - [ ] **Step 3: Implement the runner**
@@ -988,13 +988,13 @@ Note `rel(root, compose_dir.join(context))` compares against the canonical root;
 
 - [ ] **Step 5: Run tests, fmt, clippy**
 
-Run: `cargo test -p blastradius-core --test discovery && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run: `cargo test -p vernier-core --test discovery && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
 Expected: 6 passed.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add crates/blastradius-core
+git add crates/vernier-core
 git commit -m "feat(rust): docker-compose discovery and the strategy runner"
 ```
 
@@ -1003,7 +1003,7 @@ git commit -m "feat(rust): docker-compose discovery and the strategy runner"
 ### Task 8: Kubernetes strategy
 
 **Files:**
-- Create: `crates/blastradius-core/src/discover/kubernetes.rs`
+- Create: `crates/vernier-core/src/discover/kubernetes.rs`
 - Modify: `discover/mod.rs` (add module and `(DiscoveryStrategy::Kubernetes, kubernetes::discover_from_kubernetes)` second in `STRATEGIES`)
 - Test: append to `tests/discovery.rs`
 
@@ -1050,7 +1050,7 @@ Port `src/discover/kubernetes.ts`:
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core
+git add crates/vernier-core
 git commit -m "feat(rust): kubernetes discovery"
 ```
 
@@ -1059,7 +1059,7 @@ git commit -m "feat(rust): kubernetes discovery"
 ### Task 9: Monorepo strategy
 
 **Files:**
-- Create: `crates/blastradius-core/src/discover/monorepo.rs`
+- Create: `crates/vernier-core/src/discover/monorepo.rs`
 - Modify: `discover/mod.rs` (third entry in `STRATEGIES`)
 - Test: append to `tests/discovery.rs`
 
@@ -1093,7 +1093,7 @@ For each parent in order: `parent_abs = root.join(parent)`; skip unless dir. `re
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core
+git add crates/vernier-core
 git commit -m "feat(rust): monorepo discovery"
 ```
 
@@ -1102,7 +1102,7 @@ git commit -m "feat(rust): monorepo discovery"
 ### Task 10: Workspace strategy and the single-service fallback
 
 **Files:**
-- Create: `crates/blastradius-core/src/discover/workspace.rs`
+- Create: `crates/vernier-core/src/discover/workspace.rs`
 - Modify: `discover/mod.rs` (fourth entry in `STRATEGIES`)
 - Test: append to `tests/discovery.rs`; unit test in `workspace.rs`
 
@@ -1165,13 +1165,13 @@ fn parses_cargo_workspace_members() {
 
 - [ ] **Step 4: Run all tests, fmt, clippy**
 
-Run: `cargo test -p blastradius-core && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
+Run: `cargo test -p vernier-core && cargo fmt --check && cargo clippy --all-targets -- -D warnings`
 Expected: all discovery tests pass, including the fallback test now that all four strategies are wired.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core
+git add crates/vernier-core
 git commit -m "feat(rust): workspace discovery and the single-service fallback"
 ```
 
@@ -1180,7 +1180,7 @@ git commit -m "feat(rust): workspace discovery and the single-service fallback"
 ### Task 11: Graph, analyze, JSON
 
 **Files:**
-- Create: `crates/blastradius-core/src/graph.rs`, `crates/blastradius-core/src/analyze.rs`, `crates/blastradius-core/tests/analyze.rs`
+- Create: `crates/vernier-core/src/graph.rs`, `crates/vernier-core/src/analyze.rs`, `crates/vernier-core/tests/analyze.rs`
 - Modify: `lib.rs`
 
 **Interfaces:**
@@ -1217,7 +1217,7 @@ git commit -m "feat(rust): workspace discovery and the single-service fallback"
 `tests/analyze.rs`:
 ```rust
 mod common;
-use blastradius::*;
+use vernier::*;
 use common::fixture;
 use pretty_assertions::assert_eq;
 
@@ -1293,7 +1293,7 @@ fn analyze_rejects_a_file_path() {
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core
+git add crates/vernier-core
 git commit -m "feat(rust): graph, analyze and the JSON contract"
 ```
 
@@ -1302,7 +1302,7 @@ git commit -m "feat(rust): graph, analyze and the JSON contract"
 ### Task 12: Terminal report
 
 **Files:**
-- Create: `crates/blastradius-core/src/report.rs`
+- Create: `crates/vernier-core/src/report.rs`
 - Modify: `lib.rs`
 - Test: append to `tests/analyze.rs`
 
@@ -1350,7 +1350,7 @@ Port `src/report/terminal.ts` line for line. Colour helpers: `fn bold(s, color)`
 - Header rows `row(label, value)` = `format!("  {label:<13} {value}")`.
 - `Services`: `"{n} detected  (strategy)"` with the parenthesis dimmed when a strategy exists, else `"{n} detected"`.
 - `Runtime`: dim `"not connected - static only"`.
-- No strategy: yellow lines, either the deploy-only message (`This repository declares {n} services but builds none of them here,` / `so there is no code to trace. Run blast-radius on the repository that` / `holds the services.`) when there is no code and some infrastructure, else the single-service message (`This looks like a single service. Blast radius analysis needs a` / `multi-service repository.`); then `row("Tried", dim(attempts joined by " · " as "{strategy} {services}"))`.
+- No strategy: yellow lines, either the deploy-only message (`This repository declares {n} services but builds none of them here,` / `so there is no code to trace. Run vernier on the repository that` / `holds the services.`) when there is no code and some infrastructure, else the single-service message (`This looks like a single service. Blast radius analysis needs a` / `multi-service repository.`); then `row("Tried", dim(attempts joined by " · " as "{strategy} {services}"))`.
 - SERVICES table: columns NAME, LANGUAGE, ROOT, EVIDENCE; widths `max(4, names)`, `max(8, languages)`, `max(4, roots)`; root cell is `root`, or `(image {image})`, or `(no directory)`; evidence `file:line` or `file`; infrastructure rows dimmed whole; header dimmed. After the table: dim `"{n} declared but not built here (images): {names joined by ", "}"` when any infrastructure.
 - STRUCTURE: the three dimmed lines from the TypeScript source verbatim.
 - Join with `\n`, no trailing newline (the CLI adds it).
@@ -1360,7 +1360,7 @@ Port `src/report/terminal.ts` line for line. Colour helpers: `fn bold(s, color)`
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-core
+git add crates/vernier-core
 git commit -m "feat(rust): terminal repository report"
 ```
 
@@ -1369,12 +1369,12 @@ git commit -m "feat(rust): terminal repository report"
 ### Task 13: CLI
 
 **Files:**
-- Modify: `crates/blastradius-cli/src/main.rs`
-- Create: `crates/blastradius-cli/tests/cli.rs`
+- Modify: `crates/vernier-cli/src/main.rs`
+- Create: `crates/vernier-cli/tests/cli.rs`
 
 **Interfaces:**
-- Consumes: `blastradius::{analyze, format_repo_report}`.
-- Produces: the `blast-radius` binary. `blast-radius analyze [PATH] [--json] [--no-color]`, `blast-radius --version`. Errors print `blast-radius: <message>` to stderr and exit 1.
+- Consumes: `vernier::{analyze, format_repo_report}`.
+- Produces: the `vernier` binary. `vernier analyze [PATH] [--json] [--no-color]`, `vernier --version`. Errors print `vernier: <message>` to stderr and exit 1.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -1382,7 +1382,7 @@ git commit -m "feat(rust): terminal repository report"
 use std::path::PathBuf;
 use std::process::Command;
 
-fn bin() -> Command { Command::new(env!("CARGO_BIN_EXE_blast-radius")) }
+fn bin() -> Command { Command::new(env!("CARGO_BIN_EXE_vernier")) }
 fn fixture(name: &str) -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures").join(name) }
 
 #[test]
@@ -1407,19 +1407,19 @@ fn analyze_report_defaults_to_the_current_directory_and_has_no_colour_when_piped
 fn errors_go_to_stderr_with_exit_code_1() {
     let out = bin().args(["analyze", fixture("compose-app").join("docker-compose.yml").to_str().unwrap()]).output().unwrap();
     assert_eq!(out.status.code(), Some(1));
-    assert!(String::from_utf8_lossy(&out.stderr).starts_with("blast-radius: not a directory"));
+    assert!(String::from_utf8_lossy(&out.stderr).starts_with("vernier: not a directory"));
 }
 
 #[test]
 fn version_flag() {
     let out = bin().arg("--version").output().unwrap();
-    assert!(String::from_utf8_lossy(&out.stdout).starts_with("blast-radius 0.0.1"));
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with("vernier 0.0.1"));
 }
 ```
 
 - [ ] **Step 2: Run to verify failure**
 
-Run: `cargo test -p blastradius-cli`
+Run: `cargo test -p vernier-cli`
 
 - [ ] **Step 3: Implement**
 
@@ -1428,7 +1428,7 @@ use clap::{Parser, Subcommand};
 use std::io::{IsTerminal, Write};
 
 #[derive(Parser)]
-#[command(name = "blast-radius", version, about = "Which services can this change reach?")]
+#[command(name = "vernier", version, about = "Which services can this change reach?")]
 struct Cli { #[command(subcommand)] command: Cmd }
 
 #[derive(Subcommand)]
@@ -1445,18 +1445,18 @@ enum Cmd {
 }
 
 fn main() {
-    if let Err(err) = run() { eprintln!("blast-radius: {err}"); std::process::exit(1); }
+    if let Err(err) = run() { eprintln!("vernier: {err}"); std::process::exit(1); }
 }
 
 fn run() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Cmd::Analyze { path, json, no_color } => {
-            let analysis = blastradius::analyze(&path)?;
+            let analysis = vernier::analyze(&path)?;
             let mut out = std::io::stdout().lock();
             if json { writeln!(out, "{}", serde_json::to_string_pretty(&analysis.to_json())?)?; return Ok(()); }
             let color = !no_color && std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-            writeln!(out, "{}", blastradius::format_repo_report(&analysis, color))?;
+            writeln!(out, "{}", vernier::format_repo_report(&analysis, color))?;
             Ok(())
         }
     }
@@ -1470,8 +1470,8 @@ Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnin
 - [ ] **Step 5: Commit**
 
 ```bash
-git add crates/blastradius-cli
-git commit -m "feat(rust): blast-radius CLI"
+git add crates/vernier-cli
+git commit -m "feat(rust): vernier CLI"
 ```
 
 ---
@@ -1479,7 +1479,7 @@ git commit -m "feat(rust): blast-radius CLI"
 ### Task 14: Parity against the TypeScript baseline, fixtures and corpus
 
 **Files:**
-- Create: `test/expected/discovery/<fixture>.json` (10 files), `test/expected/corpus/<repo>.json` (8 files), `crates/blastradius-core/tests/parity.rs`, `crates/blastradius-core/tests/corpus.rs`
+- Create: `test/expected/discovery/<fixture>.json` (10 files), `test/expected/corpus/<repo>.json` (8 files), `crates/vernier-core/tests/parity.rs`, `crates/vernier-core/tests/corpus.rs`
 
 **Interfaces:**
 - `test/expected/corpus/<repo>.json` shape (hand-derived from the baseline JSON):
@@ -1526,7 +1526,7 @@ fn every_fixture_matches_the_typescript_baseline() {
         if path.extension().and_then(|e| e.to_str()) != Some("json") { continue; }
         let name = path.file_stem().unwrap().to_str().unwrap();
         let expected: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
-        let actual = serde_json::to_value(blastradius::analyze(&fixture(name)).unwrap().to_json()).unwrap();
+        let actual = serde_json::to_value(vernier::analyze(&fixture(name)).unwrap().to_json()).unwrap();
         assert_eq!(normalise(actual), normalise(expected), "fixture {name}");
         checked += 1;
     }
@@ -1559,11 +1559,11 @@ fn corpus_service_discovery_matches_expected() {
         if !repo.is_dir() { eprintln!("corpus/{name} missing; skipping"); continue; }
         let expected: Expected = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         let started = Instant::now();
-        let a = blastradius::analyze(&repo).unwrap();
+        let a = vernier::analyze(&repo).unwrap();
         let elapsed = started.elapsed();
         let json = a.to_json();
-        let mut code: Vec<String> = json.services.iter().filter(|s| s.role == blastradius::ServiceRole::Code).map(|s| s.name.clone()).collect(); code.sort();
-        let mut infra: Vec<String> = json.services.iter().filter(|s| s.role == blastradius::ServiceRole::Infrastructure).map(|s| s.name.clone()).collect(); infra.sort();
+        let mut code: Vec<String> = json.services.iter().filter(|s| s.role == vernier::ServiceRole::Code).map(|s| s.name.clone()).collect(); code.sort();
+        let mut infra: Vec<String> = json.services.iter().filter(|s| s.role == vernier::ServiceRole::Infrastructure).map(|s| s.name.clone()).collect(); infra.sort();
         let strategy = json.discovery.strategy.map(|s| serde_json::to_value(s).unwrap().as_str().unwrap().to_string());
         eprintln!("{name:<32} {:>4} code {:>4} infra  {:>6.1} ms", code.len(), infra.len(), elapsed.as_secs_f64() * 1000.0);
         if (strategy.clone(), code.clone(), infra.clone()) != (expected.strategy.clone(), expected.code.clone(), expected.infrastructure.clone()) {
@@ -1577,7 +1577,7 @@ fn corpus_service_discovery_matches_expected() {
 
 - [ ] **Step 4: Run both and fix every difference**
 
-Run: `cargo test -p blastradius-core --test parity --test corpus -- --nocapture`
+Run: `cargo test -p vernier-core --test parity --test corpus -- --nocapture`
 
 Expected on first run: probably a handful of differences. Known likely causes and the fix for each:
 - Ordering only: the parity test already sorts by name; if `entryPoints` differ in order, sort them in `detect_entry_points`.
@@ -1593,7 +1593,7 @@ Run: `cargo test && cargo fmt --check && cargo clippy --all-targets -- -D warnin
 - [ ] **Step 6: Commit**
 
 ```bash
-git add test/expected crates/blastradius-core/tests
+git add test/expected crates/vernier-core/tests
 git commit -m "test(rust): parity with the TypeScript baseline on fixtures and corpus"
 ```
 
@@ -1642,8 +1642,8 @@ Replace the "Run it from source" block with:
 git clone https://github.com/Go-Vernier/Vernier-OSS.git
 cd Vernier-OSS
 cargo build --release
-./target/release/blast-radius analyze /path/to/a/repository
-./target/release/blast-radius analyze /path/to/a/repository --json
+./target/release/vernier analyze /path/to/a/repository
+./target/release/vernier analyze /path/to/a/repository --json
 ```
 Replace the "Developing" section with:
 ```bash
@@ -1654,19 +1654,19 @@ cargo test --test corpus -- --nocapture   # discovery counts and timing on the c
 ```
 Replace the library example with:
 ```rust
-use blastradius::{analyze, format_repo_report};
+use vernier::{analyze, format_repo_report};
 
 let analysis = analyze(std::path::Path::new("./my-repo"))?;
 println!("{}", format_repo_report(&analysis, false));
 ```
-Add one sentence under Status: "The engine is Rust; the npm package `blastradius` will wrap the binary when it is published."
+Add one sentence under Status: "The engine is Rust; the npm package `vernier` will wrap the binary when it is published."
 
 - [ ] **Step 3: Trim package.json and fix the corpus script**
 
 `package.json`:
 ```json
 {
-  "name": "blastradius",
+  "name": "vernier",
   "version": "0.0.1",
   "description": "Which services can this change reach? Static analysis of the repository joined with production traces, at pull request time.",
   "license": "MIT",
@@ -1674,7 +1674,7 @@ Add one sentence under Status: "The engine is Rust; the npm package `blastradius
   "repository": { "type": "git", "url": "git+https://github.com/Go-Vernier/Vernier-OSS.git" },
   "homepage": "https://github.com/Go-Vernier/Vernier-OSS#readme",
   "bugs": "https://github.com/Go-Vernier/Vernier-OSS/issues",
-  "keywords": ["blast-radius", "microservices", "dependency-graph", "static-analysis", "opentelemetry", "pull-request", "impact-analysis"],
+  "keywords": ["vernier", "microservices", "dependency-graph", "static-analysis", "opentelemetry", "pull-request", "impact-analysis"],
   "scripts": { "corpus": "sh scripts/corpus.sh" }
 }
 ```
