@@ -1,0 +1,30 @@
+acme/shop · 5 services · static only · depth 3 · 9 edges · 3 infrastructure
+ 1 Overview   2 Services   3 Changes   4 Blast
+┌ Edges ────────────────────────────────────┐┌ Services ───────────────────────────────────────────┐
+│BY CONFIDENCE                              ││MOST DEPENDED ON  (inbound edges)                    │
+│observed                                 0 ││catalogue ████████████████████████████████████████ 3 │
+│static    ██████████████████████████████ 7 ││cart      ██████████████████████████▊              2 │
+│inferred                                 0 ││ratings   █████████████▍                           1 │
+│uncertain ████████▋                      2 ││                                                     │
+│                                           ││WIDEST CHANGE SURFACE  (reach at depth 3)            │
+│BY TYPE                                    ││catalogue ████████████████████████████████████████ 4 │
+│http     ███████████████████████████████ 6 ││cart      ████████████████████                     2 │
+│grpc                                     0 ││ratings   ██████████                               1 │
+│event    █████▎                          1 ││                                                     │
+│database ██████████▍                     2 ││                                                     │
+│import                                   0 ││                                                     │
+└───────────────────────────────────────────┘└─────────────────────────────────────────────────────┘
+┌ Report  j/k scroll ──────────────────────────────────────────────────────────────────────────────┐
+│VERNIER                                                                                           │
+│                                                                                                  │
+│  Repository    acme/shop                                                                         │
+│  Services      5 detected  (docker-compose)                                                      │
+│  Runtime       not connected - static only                                                       │
+│                                                                                                  │
+│SERVICES                                                                                          │
+│                                                                                                  │
+│  NAME       LANGUAGE    ROOT                           EVIDENCE                                  │
+│  cart       javascript  cart                           docker-compose.yml:7                      │
+│  catalogue  go          catalogue                      docker-compose.yml:11                     │
+└──────────────────────────────────────────────────────────────────────────────────────────────────┘
+j/k scroll · 1-4 tabs · ? help · q quit
