@@ -43,6 +43,8 @@ module_name_repetitions = "allow"
 missing_errors_doc = "allow"
 missing_panics_doc = "allow"
 must_use_candidate = "allow"
+# New in Clippy 1.99; the tests' assert!(x.is_empty()) reads fine as it is.
+assert_is_empty = "allow"
 
 # Dependencies, the tree-sitter grammars above all, are compiled optimised
 # even in dev builds; our own crates stay unoptimised for fast rebuilds.

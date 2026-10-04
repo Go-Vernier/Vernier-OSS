@@ -82,6 +82,16 @@ jobs:
         with:
           key: ${{ matrix.target }}
       - run: cargo build --release --locked -p vernier-cli --target "$TARGET"
+      - name: The Windows binary needs no C runtime DLLs
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -find '**\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin.exe not found" }
+          $deps = & $dumpbin /nologo /dependents "target\$env:TARGET\release\vernier.exe" | Out-String
+          Write-Host $deps
+          if ($deps -match '(?i)vcruntime|msvcp|api-ms-win-crt') { throw "vernier.exe links the C runtime dynamically" }
       - name: Package
         run: |
           exe=vernier
