@@ -1,0 +1,4 @@
+# LF everywhere, so Windows checkouts keep the fixtures and expected output
+# in test/ byte-identical. PowerShell scripts keep CRLF for Windows PowerShell.
+* text=auto eol=lf
+*.ps1 text eol=crlf
