@@ -261,10 +261,10 @@ jobs:
           if [ "$PRERELEASE" = true ]; then tag=next; fi
           publish() {
             name=$(node -p "require('$1/package.json').name")
-            if [ "$PUBLISH" != true ]; then
-              npm publish "$1" --access public --tag "$tag" --dry-run
-            elif npm view "$name@$VERSION" version > /dev/null 2>&1; then
+            if npm view "$name@$VERSION" version > /dev/null 2>&1; then
               echo "$name@$VERSION is already published; skipping"
+            elif [ "$PUBLISH" != true ]; then
+              npm publish "$1" --access public --tag "$tag" --dry-run
             else
               npm publish "$1" --access public --tag "$tag" --provenance
             fi
@@ -338,13 +338,12 @@ jobs:
           curl -fsSL https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.sh \
             | VERNIER_INSTALL_DIR="$RUNNER_TEMP/v" sh
           "$RUNNER_TEMP/v/vernier" --version | grep -F "vernier $VERSION"
-      - name: irm | iex
+      - name: The README's Windows one-liner, from Command Prompt (Windows PowerShell 5.1)
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: cmd
         run: |
-          irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex
-          $v = & "$env:LOCALAPPDATA\Programs\vernier\bin\vernier.exe" --version
-          if ($v -notmatch [regex]::Escape("vernier $env:VERSION")) { throw "installed: $v" }
+          powershell -ExecutionPolicy ByPass -c "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex" || exit /b 1
+          "%LOCALAPPDATA%\Programs\vernier\bin\vernier.exe" --version | findstr /C:"vernier %VERSION%" || exit /b 1
       - name: npx
         run: |
           # The registry can take a minute to serve a new version everywhere.

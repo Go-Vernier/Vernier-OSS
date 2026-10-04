@@ -33,10 +33,10 @@ brew install go-vernier/tap/vernier      # Homebrew, macOS and Linux
 curl -fsSL https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.sh | sh
 ```
 
-On Windows, in PowerShell:
+On Windows, in Command Prompt or PowerShell:
 
 ```powershell
-irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex
+powershell -ExecutionPolicy ByPass -c "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex"
 ```
 
 Prebuilt for macOS (Apple silicon, Intel), Linux (x64, arm64; any

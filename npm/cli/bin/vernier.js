@@ -9,7 +9,7 @@ const { packageFor, binaryName } = require("../lib/platform");
 const INSTALL_ELSEWHERE = [
   "Install vernier another way:",
   "  curl -fsSL https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.sh | sh",
-  "  irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex",
+  `  powershell -ExecutionPolicy ByPass -c "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex"`,
 ].join("\n");
 
 function fail(message) {

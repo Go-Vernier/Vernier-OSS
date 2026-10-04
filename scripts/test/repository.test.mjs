@@ -37,3 +37,11 @@ test("another tag fails the release check", () => {
   assert.equal(out.status, 1);
   assert.match(out.stderr, /release: tag v99\.0\.0 does not match the Cargo\.toml version/);
 });
+
+test("the README's Windows one-liner enables TLS 1.2 before it downloads", () => {
+  // Windows PowerShell 5.1 on older Windows offers only TLS 1.0 by default, and
+  // the TLS line inside install.ps1 runs only after irm has fetched it.
+  const tls12 = "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm ";
+  assert.ok(read("README.md").includes(`${tls12}https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex`));
+  assert.ok(read("npm/cli/bin/vernier.js").includes(tls12), "the launcher's fallback advice too");
+});

@@ -1,6 +1,9 @@
 # Installs vernier from a GitHub release on Windows.
 #
-#   irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex
+#   powershell -ExecutionPolicy ByPass -c "[Net.ServicePointManager]::SecurityProtocol = 'Tls12'; irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex"
+#
+# The TLS 1.2 line is for Windows PowerShell 5.1 on older Windows, which
+# otherwise cannot fetch this script from GitHub.
 #
 # $env:VERNIER_VERSION      a release such as v0.1.0 (default: the latest)
 # $env:VERNIER_INSTALL_DIR  where to put vernier.exe

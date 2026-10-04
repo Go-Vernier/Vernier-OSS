@@ -13,9 +13,19 @@ GitHub Release, publishes to npm and updates the Homebrew tap.
    a README. Create a fine-grained token with Contents read and write on that
    repository only, and add it here as `HOMEBREW_TAP_TOKEN`.
 
-After the first release, switch npm to trusted publishing: on each of the six
-packages' settings pages on npmjs.com, add this repository and `release.yml`
-as a trusted publisher, then delete `NPM_TOKEN`.
+npm write tokens expire (granular tokens last at most 90 days). If the npm
+job fails to authenticate, create a new token, replace `NPM_TOKEN`, and re-run
+that job.
+
+After the first release, trusted publishing (OIDC) removes the token. It
+needs npm 11.5.1 or later, newer than the npm that ships with Node 22, so do
+it in this order:
+
+1. In the `npm` job of `release.yml`, add `run: npm install -g npm@^11.5.1`
+   after `actions/setup-node`.
+2. On each of the six packages' settings pages on npmjs.com, add this
+   repository and `release.yml` as a trusted publisher.
+3. Cut a release and check that it publishes; then delete `NPM_TOKEN`.
 
 ## Cutting a release
 
