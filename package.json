@@ -20,6 +20,7 @@
     "impact-analysis"
   ],
   "scripts": {
-    "corpus": "sh scripts/corpus.sh"
+    "corpus": "sh scripts/corpus.sh",
+    "test:packaging": "node --test npm/cli/test/*.test.js scripts/test/*.test.mjs"
   }
 }
