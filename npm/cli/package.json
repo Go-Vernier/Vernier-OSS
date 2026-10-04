@@ -1,0 +1,41 @@
+{
+  "name": "@go-vernier/cli",
+  "version": "0.0.0-dev",
+  "description": "Which services can this change reach? See the blast radius of a pull request before you merge it.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Go-Vernier/Vernier-OSS.git",
+    "directory": "npm/cli"
+  },
+  "homepage": "https://github.com/Go-Vernier/Vernier-OSS#readme",
+  "bugs": "https://github.com/Go-Vernier/Vernier-OSS/issues",
+  "keywords": [
+    "vernier",
+    "microservices",
+    "dependency-graph",
+    "static-analysis",
+    "opentelemetry",
+    "pull-request",
+    "impact-analysis",
+    "blast-radius",
+    "cli"
+  ],
+  "bin": {
+    "vernier": "bin/vernier.js"
+  },
+  "files": [
+    "bin",
+    "lib"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "optionalDependencies": {
+    "@go-vernier/cli-darwin-arm64": "0.0.0-dev",
+    "@go-vernier/cli-darwin-x64": "0.0.0-dev",
+    "@go-vernier/cli-linux-arm64": "0.0.0-dev",
+    "@go-vernier/cli-linux-x64": "0.0.0-dev",
+    "@go-vernier/cli-win32-x64": "0.0.0-dev"
+  }
+}

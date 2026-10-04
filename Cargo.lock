@@ -2078,7 +2078,7 @@ dependencies = [
 
 [[package]]
 name = "vernier-cli"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -2090,7 +2090,7 @@ dependencies = [
 
 [[package]]
 name = "vernier-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "globset",
  "ignore",
@@ -2118,7 +2118,7 @@ dependencies = [
 
 [[package]]
 name = "vernier-tui"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "pretty_assertions",
