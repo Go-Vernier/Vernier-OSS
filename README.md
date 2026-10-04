@@ -9,7 +9,8 @@ See the blast radius of a pull request before you merge it.
 [![CI](https://github.com/Go-Vernier/Vernier-OSS/actions/workflows/ci.yml/badge.svg)](https://github.com/Go-Vernier/Vernier-OSS/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-3ddc97.svg)](LICENSE)
 [![Rust 1.85+](https://img.shields.io/badge/rust-1.85%2B-ff5ca8.svg?logo=rust)](https://www.rust-lang.org)
-[![Status: Phase 0](https://img.shields.io/badge/status-phase%200-ffb454.svg)](docs/build-spec.md)
+[![Release](https://img.shields.io/github/v/release/Go-Vernier/Vernier-OSS?color=ffb454)](https://github.com/Go-Vernier/Vernier-OSS/releases/latest)
+[![npm](https://img.shields.io/npm/v/@go-vernier/cli?color=cb3837&logo=npm)](https://www.npmjs.com/package/@go-vernier/cli)
 [![No telemetry](https://img.shields.io/badge/telemetry-none-5aa9ff.svg)](#principles)
 [![Works offline](https://img.shields.io/badge/works-offline-8b93a7.svg)](#principles)
 
@@ -23,18 +24,35 @@ which, and tells you what a change can affect. It combines what the code
 (OpenTelemetry or Datadog traces). Every edge it reports points to a file and
 line, and says how sure the tool is.
 
+## Install
+
+```bash
+npx @go-vernier/cli analyze .            # run it once, nothing to install
+npm install -g @go-vernier/cli           # npm
+brew install go-vernier/tap/vernier      # Homebrew, macOS and Linux
+curl -fsSL https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.sh | sh
+```
+
+On Windows, in PowerShell:
+
+```powershell
+irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex
+```
+
+Prebuilt for macOS (Apple silicon, Intel), Linux (x64, arm64; any
+distribution) and Windows (x64). Every download is checked against its
+SHA-256. From source, with a stable Rust toolchain:
+
+```bash
+cargo install --git https://github.com/Go-Vernier/Vernier-OSS vernier-cli
+```
+
 ## Quick start
 
 ```bash
-git clone https://github.com/Go-Vernier/Vernier-OSS.git
-cd Vernier-OSS
-cargo build --release
-
-./target/release/vernier analyze /path/to/repo      # the report
-./target/release/vernier tui /path/to/repo          # explore it interactively
+vernier analyze /path/to/repo      # the report
+vernier tui /path/to/repo          # explore it interactively
 ```
-
-Not yet published to npm or crates.io. You need a stable Rust toolchain.
 
 ## What you get
 

@@ -248,6 +248,8 @@ services per repository; `test/expected/discovery/` holds the output the
 original TypeScript engine produced on every fixture, which the Rust engine
 must reproduce.
 
+Releases are cut by tagging; see [Releasing](releasing.md).
+
 The `vernier-core` crate is also a library:
 
 ```rust
