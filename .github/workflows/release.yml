@@ -1,0 +1,351 @@
+# Builds, tests and publishes a release. Only a v* tag publishes; a pull
+# request that touches packaging, or a manual run, is a dry run of the same
+# pipeline. See docs/releasing.md.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - .github/workflows/release.yml
+      - npm/**
+      - scripts/**
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - id: version
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            version=$(node scripts/release.mjs version "$GITHUB_REF_NAME")
+            publish=true
+          else
+            version=$(node scripts/release.mjs version)
+            publish=false
+          fi
+          case "$version" in *-*) prerelease=true ;; *) prerelease=false ;; esac
+          {
+            echo "version=$version"
+            echo "publish=$publish"
+            echo "prerelease=$prerelease"
+          } >> "$GITHUB_OUTPUT"
+          echo "Release $version (publish: $publish, prerelease: $prerelease)"
+
+  build:
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest }
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      TARGET: ${{ matrix.target }}
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install the musl toolchain
+        if: contains(matrix.target, 'musl')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          echo "CC_$(echo "$TARGET" | tr - _)=musl-gcc" >> "$GITHUB_ENV"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: cargo build --release --locked -p vernier-cli --target "$TARGET"
+      - name: Package
+        run: |
+          exe=vernier
+          if [ "$RUNNER_OS" = Windows ]; then exe=vernier.exe; fi
+          bin="target/$TARGET/release/$exe"
+          "$bin" --version | grep -F "vernier $VERSION"
+          "$bin" analyze . > /dev/null
+          mkdir -p stage out "bin-$TARGET"
+          cp "$bin" LICENSE README.md stage/
+          cp "$bin" "bin-$TARGET/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            asset="vernier-$TARGET.zip"
+            (cd stage && 7z a -tzip "../out/$asset" "$exe" LICENSE README.md > /dev/null)
+          else
+            asset="vernier-$TARGET.tar.gz"
+            tar -czf "out/$asset" -C stage "$exe" LICENSE README.md
+          fi
+          cd out
+          if command -v sha256sum > /dev/null; then
+            sha256sum "$asset" > "$asset.sha256"
+          else
+            shasum -a 256 "$asset" > "$asset.sha256"
+          fi
+          cat "$asset.sha256"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: out/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.target }}
+          path: bin-${{ matrix.target }}/
+          if-no-files-found: error
+
+  smoke:
+    needs: [check, build]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: bins
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: The npm packages install and run
+        run: |
+          node scripts/npm-packages.mjs "$VERSION" bins "$RUNNER_TEMP/npm"
+          platform=$(node -p "require('./npm/cli/lib/platform').packageFor(process.platform, process.arch).split('/')[1]")
+          mkdir "$RUNNER_TEMP/packs" "$RUNNER_TEMP/app"
+          (cd "$RUNNER_TEMP/packs" && npm pack "$RUNNER_TEMP/npm/cli" "$RUNNER_TEMP/npm/$platform")
+          cd "$RUNNER_TEMP/app"
+          npm init -y > /dev/null
+          npm install --omit=optional "$RUNNER_TEMP"/packs/*.tgz
+          npx --no-install vernier --version | grep -F "vernier $VERSION"
+          npx --no-install vernier analyze "$GITHUB_WORKSPACE/test/fixtures/edges-http-app"
+      - name: install.sh installs from the build
+        if: runner.os != 'Windows'
+        run: |
+          VERNIER_BASE_URL="file://$PWD/dist" VERNIER_INSTALL_DIR="$RUNNER_TEMP/sh-bin" sh scripts/install.sh
+          "$RUNNER_TEMP/sh-bin/vernier" --version | grep -F "vernier $VERSION"
+      - name: The Linux binary runs on Alpine
+        if: runner.os == 'Linux'
+        run: |
+          chmod +x bins/bin-x86_64-unknown-linux-musl/vernier
+          docker run --rm -v "$PWD/bins/bin-x86_64-unknown-linux-musl:/b:ro" -v "$PWD/test/fixtures:/f:ro" \
+            alpine:latest sh -c '/b/vernier --version && /b/vernier analyze /f/edges-http-app > /dev/null'
+      - name: install.ps1 installs from the build (PowerShell 7 and 5.1)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $server = Start-Process python -ArgumentList '-m', 'http.server', '8765', '--bind', '127.0.0.1', '--directory', 'dist' -PassThru -WindowStyle Hidden
+          Start-Sleep -Seconds 3
+          try {
+            $env:VERNIER_BASE_URL = 'http://127.0.0.1:8765'
+            foreach ($shell in 'pwsh', 'powershell') {
+              $env:VERNIER_INSTALL_DIR = "$env:RUNNER_TEMP\ps-bin-$shell"
+              & $shell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
+              if ($LASTEXITCODE -ne 0) { throw "install.ps1 failed under $shell" }
+              $v = & "$env:VERNIER_INSTALL_DIR\vernier.exe" --version
+              if ($v -notmatch [regex]::Escape("vernier $env:VERSION")) { throw "$shell installed: $v" }
+              Write-Host "$shell -> $v"
+            }
+          } finally {
+            Stop-Process -Id $server.Id -ErrorAction SilentlyContinue
+          }
+
+  release:
+    needs: [check, smoke]
+    if: needs.check.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      PRERELEASE: ${{ needs.check.outputs.prerelease }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Create the GitHub release
+        run: |
+          (cd dist && sha256sum -- *.tar.gz *.zip > SHA256SUMS && cat SHA256SUMS)
+          cp scripts/install.sh scripts/install.ps1 dist/
+          node scripts/release.mjs notes "$VERSION" > "$RUNNER_TEMP/notes.md"
+          if gh release view "v$VERSION" > /dev/null 2>&1; then
+            gh release upload "v$VERSION" dist/* --clobber
+          else
+            flags=""
+            if [ "$PRERELEASE" = true ]; then flags="--prerelease"; fi
+            # shellcheck disable=SC2086
+            gh release create "v$VERSION" dist/* --verify-tag --title "v$VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md" $flags
+          fi
+
+  npm:
+    needs: [check, smoke, release]
+    if: >-
+      !cancelled() && needs.smoke.result == 'success' &&
+      (needs.release.result == 'success' || needs.release.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      PUBLISH: ${{ needs.check.outputs.publish }}
+      PRERELEASE: ${{ needs.check.outputs.prerelease }}
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bin-*
+          path: bins
+      - name: Publish the platform packages, then @go-vernier/cli
+        run: |
+          node scripts/npm-packages.mjs "$VERSION" bins "$RUNNER_TEMP/npm"
+          tag=latest
+          if [ "$PRERELEASE" = true ]; then tag=next; fi
+          publish() {
+            name=$(node -p "require('$1/package.json').name")
+            if [ "$PUBLISH" != true ]; then
+              npm publish "$1" --access public --tag "$tag" --dry-run
+            elif npm view "$name@$VERSION" version > /dev/null 2>&1; then
+              echo "$name@$VERSION is already published; skipping"
+            else
+              npm publish "$1" --access public --tag "$tag" --provenance
+            fi
+          }
+          for dir in "$RUNNER_TEMP"/npm/cli-*; do publish "$dir"; done
+          publish "$RUNNER_TEMP/npm/cli"
+
+  homebrew:
+    needs: [check, smoke, release]
+    if: >-
+      !cancelled() && needs.smoke.result == 'success' &&
+      needs.check.outputs.prerelease != 'true' &&
+      (needs.release.result == 'success' || needs.release.result == 'skipped')
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Write the formula
+        run: |
+          node scripts/homebrew-formula.mjs "$VERSION" dist > "$RUNNER_TEMP/vernier.rb"
+          cat "$RUNNER_TEMP/vernier.rb"
+          ruby -c "$RUNNER_TEMP/vernier.rb"
+      - name: Commit it to the tap
+        if: needs.check.outputs.publish == 'true'
+        env:
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:$TAP_TOKEN@github.com/Go-Vernier/homebrew-tap.git" "$RUNNER_TEMP/tap"
+          cd "$RUNNER_TEMP/tap"
+          mkdir -p Formula
+          cp "$RUNNER_TEMP/vernier.rb" Formula/vernier.rb
+          git add Formula/vernier.rb
+          if git diff --cached --quiet; then
+            echo "The formula is already at $VERSION"
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "vernier $VERSION"
+          git push
+
+  verify:
+    needs: [check, npm, homebrew]
+    if: needs.check.outputs.publish == 'true' && needs.check.outputs.prerelease != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: curl | sh
+        if: runner.os != 'Windows'
+        run: |
+          curl -fsSL https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.sh \
+            | VERNIER_INSTALL_DIR="$RUNNER_TEMP/v" sh
+          "$RUNNER_TEMP/v/vernier" --version | grep -F "vernier $VERSION"
+      - name: irm | iex
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          irm https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.ps1 | iex
+          $v = & "$env:LOCALAPPDATA\Programs\vernier\bin\vernier.exe" --version
+          if ($v -notmatch [regex]::Escape("vernier $env:VERSION")) { throw "installed: $v" }
+      - name: npx
+        run: |
+          # The registry can take a minute to serve a new version everywhere.
+          for attempt in 1 2 3 4 5; do
+            if npx --yes "@go-vernier/cli@$VERSION" --version | grep -F "vernier $VERSION"; then exit 0; fi
+            echo "attempt $attempt failed; retrying in 30s"
+            sleep 30
+          done
+          exit 1
+      - name: brew
+        if: runner.os == 'macOS'
+        run: |
+          brew install go-vernier/tap/vernier
+          vernier --version | grep -F "vernier $VERSION"
