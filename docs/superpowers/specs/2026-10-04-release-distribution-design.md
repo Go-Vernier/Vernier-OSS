@@ -37,8 +37,8 @@ work; the crate names do not change.
 
 | Target | Runner | Archive |
 | --- | --- | --- |
-| `aarch64-apple-darwin` | `macos-14` | `.tar.gz` |
-| `x86_64-apple-darwin` | `macos-13` | `.tar.gz` |
+| `aarch64-apple-darwin` | `macos-latest` | `.tar.gz` |
+| `x86_64-apple-darwin` | `macos-15-intel` | `.tar.gz` |
 | `x86_64-unknown-linux-musl` | `ubuntu-latest` + `musl-tools` | `.tar.gz` |
 | `aarch64-unknown-linux-musl` | `ubuntu-24.04-arm` + `musl-tools` | `.tar.gz` |
 | `x86_64-pc-windows-msvc` | `windows-latest` | `.zip` |
@@ -50,13 +50,19 @@ through ureq with rustls, so there is no OpenSSL to link.
 
 ## Release workflow
 
-`release.yml` runs on `push` of a `v*` tag, and on `workflow_dispatch` with a
-boolean `dry_run` input that defaults to true.
+`release.yml` runs on `push` of a `v*` tag; that is the only event that
+publishes. Every other trigger is a dry run: `workflow_dispatch` (no inputs),
+and `pull_request` when the change touches `release.yml`, `npm/**` or
+`scripts/**`. The pull request trigger exists because GitHub only dispatches
+workflows present on the default branch, so it is how the pipeline is proven
+before it is merged.
 
-1. **check.** The tag (or, on dispatch, the `Cargo.toml` version) is the
-   version. On a tag push the job fails unless the tag equals `v` + the
-   `[workspace.package] version` in `Cargo.toml`. It fails unless
-   `CHANGELOG.md` has a `## [<version>]` section. Outputs: `version`.
+1. **check.** `node scripts/release.mjs version [tag]` reads the
+   `[workspace.package] version` from `Cargo.toml`. On a tag push it fails
+   unless the tag equals `v` + that version. It always fails unless
+   `CHANGELOG.md` has a `## [<version>]` section. Outputs: `version`,
+   `publish` (true only on a tag push), `prerelease` (true when the version
+   has a `-` suffix, such as `0.2.0-rc.1`).
 2. **build** (matrix, the five targets). `cargo build --release --locked -p
    vernier-cli --target <t>`. Smoke test: the built binary runs `--version`
    (output must contain the version) and `analyze .`. Packs
@@ -64,23 +70,33 @@ boolean `dry_run` input that defaults to true.
    and `README.md`, and writes `vernier-<target>.<ext>.sha256` beside it in
    `sha256sum` format. Asset names carry no version, so
    `releases/latest/download/<name>` always resolves to the newest release.
-3. **smoke** (matrix: ubuntu-latest, macos-14, windows-latest). Downloads the
+   The build also uploads the bare binary as `bin-<target>/vernier[.exe]`
+   for the npm packages.
+3. **smoke** (matrix: ubuntu-latest, macos-latest, windows-latest). Downloads the
    build artifacts. Generates the npm packages, `npm pack`s the main package
    and the runner's platform package, installs both tarballs into a temporary
    project with `--omit=optional`, and runs `npx vernier --version` and
    `npx vernier analyze test/fixtures/edges-http-app`. On Linux and macOS it also runs
    `install.sh` with `VERNIER_BASE_URL=file://<artifacts dir>` into a
-   temporary directory and runs the installed binary.
+   temporary directory and runs the installed binary. On Linux it runs the
+   x64 musl binary in an `alpine` container. On Windows it serves the
+   artifacts over a local HTTP server and runs `install.ps1` with
+   `VERNIER_BASE_URL` under both PowerShell 7 and Windows PowerShell 5.1.
 4. **release** (skipped on dry run). Writes `SHA256SUMS` over every archive,
    extracts the version's section of `CHANGELOG.md` as the release notes, and
    creates the GitHub Release for the tag with the archives, the `.sha256`
-   files, `SHA256SUMS`, `install.sh` and `install.ps1`.
+   files, `SHA256SUMS`, `install.sh` and `install.ps1`. A prerelease version
+   makes a GitHub prerelease. If the release already exists, the assets are
+   re-uploaded over it.
 5. **npm** (after release; on dry run, after smoke, with `npm publish
    --dry-run`). Publishes the five platform packages, then the main package.
-6. **homebrew** (after release; on dry run, prints the formula only).
-   Generates `Formula/vernier.rb` and commits it to the tap.
-7. **verify** (after npm and homebrew; skipped on dry run; matrix:
-   ubuntu-latest, macos-14, windows-latest). Runs the published one-liners on
+   A prerelease is published under the `next` dist-tag, not `latest`.
+6. **homebrew** (after release; skipped for prereleases; on dry run, prints
+   the formula and checks its Ruby syntax only). Generates
+   `Formula/vernier.rb` and commits it to the tap.
+7. **verify** (after npm and homebrew; skipped on dry run and for
+   prereleases; matrix: ubuntu-latest, macos-latest, windows-latest). Runs
+   the published one-liners on
    clean runners: `curl | sh` (Linux, macOS), `irm | iex` (Windows),
    `npx @go-vernier/cli --version` (all), `brew install
    go-vernier/tap/vernier` (macOS). Each must print the version.
@@ -107,12 +123,17 @@ the release stands and that job is re-run alone; no rebuild is needed.
   `process.platform`/`process.arch` and pointing at the shell and PowerShell
   installers, and exits 1.
 - `README.md`: install and the three most-used commands; links to the repo.
-- `lib/platform.test.js`: `node --test` unit tests for the mapping.
+- `test/`: `node --test` tests for the mapping and the launcher; not
+  published.
 
-`scripts/npm-packages.mjs <version> <artifacts-dir> <out-dir>` writes
+`scripts/targets.mjs` lists the five targets once (triple, npm `os`/`cpu`,
+archive type) for every packaging script.
+
+`scripts/npm-packages.mjs <version> <bins-dir> <out-dir>` writes
 `<out-dir>/cli` (a copy of `npm/cli` with the version stamped into
 `version` and every `optionalDependencies` entry) and one
-`<out-dir>/cli-<os>-<cpu>` per target found in the artifacts directory. A
+`<out-dir>/cli-<os>-<cpu>` per target. Every target's binary must be in
+`<bins-dir>`, and `<out-dir>` must be empty or absent. A
 platform package's `package.json` has `name`, `version`, `description`,
 `license`, `repository`, `os`, `cpu`, `files: ["bin"]`, and
 `preferUnplugged: true`; its `bin/` holds the binary, mode 0755. There is no
@@ -162,8 +183,11 @@ unchanged it commits nothing.
 `scripts/install.ps1`:
 
 - Supports x64, and Windows on ARM through x64 emulation.
-- `VERNIER_VERSION`, `VERNIER_INSTALL_DIR` (default
+- `VERNIER_VERSION`, `VERNIER_BASE_URL` and `VERNIER_INSTALL_DIR` (default
   `$env:LOCALAPPDATA\Programs\vernier\bin`) as above.
+- Runs inside a script block, so `irm | iex` leaves no variables or
+  preference changes behind in the user's session. Enables TLS 1.2, which
+  Windows PowerShell 5.1 on older Windows does not use by default.
 - Downloads with `Invoke-WebRequest`, verifies with `Get-FileHash -Algorithm
   SHA256` against the `.sha256` file, extracts with `Expand-Archive`.
 - Adds the directory to the user `PATH` (never the machine `PATH`) when
@@ -174,8 +198,10 @@ unchanged it commits nothing.
 `ci.yml`:
 
 - The test matrix gains `windows-latest`. The smoke step stays.
-- A `packaging` job on ubuntu-latest: `node --test npm/cli/lib`,
-  `shellcheck scripts/install.sh`.
+- A `packaging` job on ubuntu-latest: the `node --test` suites under
+  `npm/cli/test` and `scripts/test` (including `install.sh` against a fake
+  release), `shellcheck scripts/install.sh`, a PowerShell parse of
+  `install.ps1`, and `actionlint` over the workflows.
 
 `.gitattributes`: `* text=auto eol=lf`, with `*.ps1 text eol=crlf`, so
 Windows checkouts keep the LF fixtures in `test/` byte-identical.
@@ -200,7 +226,7 @@ not published) moves to `0.1.0` with it. `npm/cli/package.json` stays
   recorded; until then the README does not reference it.
 - **Demo.** `docs/demo.tape` is a VHS script that runs `vernier tui` on
   `instana/robot-shop` and walks a blast radius. `.github/workflows/demo.yml`
-  (`workflow_dispatch` only) builds the binary, clones robot-shop, runs VHS,
+  (`workflow_dispatch` only, so it runs once merged to `main`) builds the binary, clones robot-shop, runs VHS,
   and uploads `demo.gif` as an artifact for a maintainer to commit.
 - **CHANGELOG.md.** Keep a Changelog format. `## [0.1.0] - <release date>`
   lists what ships: service discovery, static edges, the runtime join
@@ -217,15 +243,18 @@ not published) moves to `0.1.0` with it. `npm/cli/package.json` stays
    repository secret `NPM_TOKEN`.
 2. Create the public repository `Go-Vernier/homebrew-tap`; add a
    fine-grained token with contents write on it as `HOMEBREW_TAP_TOKEN`.
-3. Run `release.yml` with `dry_run: true`; then push `v0.1.0`.
+3. Merge to `main` once the pull request's release dry run passes; then
+   push `v0.1.0` from `main`.
 
 ## Testing
 
 | What | Where |
 | --- | --- |
 | Rust on Linux, macOS, Windows | `ci.yml` test matrix |
-| Launcher platform mapping | `node --test` in `ci.yml` packaging |
-| `install.sh` lint | `shellcheck` in `ci.yml` packaging |
+| Launcher mapping, arguments, exit codes, signals | `node --test` in `ci.yml` packaging |
+| npm package generation, formula, changelog notes | `node --test` in `ci.yml` packaging |
+| `install.sh` install, upgrade, checksum and download failures | `node --test` in `ci.yml` packaging |
+| Script and workflow lint | `shellcheck`, PowerShell parse, `actionlint` in `ci.yml` packaging |
 | Each release binary runs | `release.yml` build smoke |
 | npm packages install and run, three OSes | `release.yml` smoke |
 | `install.sh` installs from artifacts | `release.yml` smoke |
