@@ -1,0 +1,28 @@
+# Records the README demo GIF from docs/demo.tape. Run it by hand, download
+# the demo artifact, and commit it as docs/demo.gif.
+name: Demo
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p vernier-cli
+      - run: echo "$PWD/target/release" >> "$GITHUB_PATH"
+      - run: git clone --depth 1 https://github.com/instana/robot-shop.git robot-shop
+      - uses: charmbracelet/vhs-action@v2
+        with:
+          path: docs/demo.tape
+      - uses: actions/upload-artifact@v4
+        with:
+          name: demo
+          path: demo.gif
+          if-no-files-found: error

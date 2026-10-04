@@ -74,7 +74,8 @@ fn errors_go_to_stderr_with_exit_code_1() {
 #[test]
 fn version_flag() {
     let out = bin().arg("--version").output().unwrap();
-    assert!(String::from_utf8_lossy(&out.stdout).starts_with("vernier 0.0.1"));
+    let expected = concat!("vernier ", env!("CARGO_PKG_VERSION"));
+    assert!(String::from_utf8_lossy(&out.stdout).starts_with(expected));
 }
 
 fn runtime_fixture(file: &str) -> String {
