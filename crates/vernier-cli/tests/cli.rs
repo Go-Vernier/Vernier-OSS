@@ -114,6 +114,7 @@ fn otel_flag_joins_a_servicegraph_scrape() {
             fixture("runtime-app").to_str().unwrap(),
             "--otel",
             &runtime_fixture("traces.prom"),
+            "--full",
         ])
         .output()
         .unwrap();
@@ -437,4 +438,211 @@ fn tui_shares_the_change_flags_with_analyze() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("cannot be used with"));
+}
+
+#[test]
+fn bare_vernier_walks_your_changes_or_prints_a_short_summary() {
+    let root = repo("bare");
+    let run = |args: &[&str]| {
+        let out = bin().args(args).current_dir(&root).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    let clean = run(&[]);
+    assert!(clean.contains("NO CHANGES"), "{clean}");
+    assert!(clean.contains("vernier --full"), "{clean}");
+    assert!(!clean.contains("EDGES"), "{clean}");
+
+    std::fs::write(root.join("catalogue/main.go"), "package main // edited\n").unwrap();
+    let dirty = run(&[]);
+    assert!(
+        dirty.contains("Change        your changes on main  uncommitted edits"),
+        "{dirty}"
+    );
+    assert!(
+        dirty.contains("1 service changed -> 4 services in the blast radius"),
+        "{dirty}"
+    );
+    assert_eq!(run(&["analyze"]), dirty, "analyze is the same command");
+
+    let full = run(&["--full"]);
+    assert!(
+        full.contains("SERVICES") && full.contains("EDGES"),
+        "{full}"
+    );
+    assert!(!full.contains("BLAST RADIUS"), "{full}");
+
+    let json: serde_json::Value = serde_json::from_str(&run(&["--json"])).unwrap();
+    assert_eq!(json["blast"]["change"]["kind"], "working");
+    assert_eq!(
+        json["blast"]["change"]["files"],
+        serde_json::json!(["catalogue/main.go"])
+    );
+
+    let both = bin()
+        .args(["--full", "--files", "a"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert_eq!(both.status.code(), Some(2), "--full names no change");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// A one-request HTTP server on a free port. Returns its base URL and a
+/// handle yielding the raw request it received.
+fn fake_llm(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<String>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let handle = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut head = String::new();
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = v.trim().parse().unwrap();
+            }
+            head.push_str(&line);
+            if line == "\r\n" {
+                break;
+            }
+        }
+        let mut payload = vec![0; length];
+        reader.read_exact(&mut payload).unwrap();
+        write!(
+            stream,
+            "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        head + &String::from_utf8(payload).unwrap()
+    });
+    (url, handle)
+}
+
+fn explain_cmd(url: &str, provider: &str) -> Command {
+    let mut cmd = bin();
+    cmd.args([
+        "analyze",
+        fixture("edges-http-app").to_str().unwrap(),
+        "--files",
+        "catalogue/main.go",
+        "--explain",
+    ])
+    .env_remove("ANTHROPIC_API_KEY")
+    .env_remove("OPENAI_API_KEY")
+    .env_remove("GEMINI_API_KEY")
+    .env_remove("VERNIER_LLM_MODEL")
+    .env("VERNIER_LLM", provider)
+    .env("VERNIER_LLM_URL", url);
+    cmd
+}
+
+#[test]
+fn explain_sends_the_blast_radius_to_an_openai_compatible_server() {
+    let (url, server) = fake_llm(
+        200,
+        r#"{"choices":[{"message":{"role":"assistant","content":"- catalogue changed\n- web, ratings and payment call it"}}]}"#,
+    );
+    let out = explain_cmd(&url, "openai-compatible")
+        .env("VERNIER_LLM_MODEL", "local-model")
+        .env("VERNIER_LLM_API_KEY", "secret-k")
+        .output()
+        .unwrap();
+    let request = server.join().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        request.starts_with("POST /v1/chat/completions "),
+        "{request}"
+    );
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer secret-k"),
+        "{request}"
+    );
+    assert!(request.contains("\"model\":\"local-model\""), "{request}");
+    assert!(request.contains("catalogue/main.go"), "{request}");
+    assert!(
+        !request.contains("http://catalogue:8080"),
+        "no evidence snippets leave the machine: {request}"
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("BLAST RADIUS"), "{text}");
+    assert!(
+        text.contains("EXPLANATION  written by openai-compatible local-model"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  - web, ratings and payment call it"),
+        "{text}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("no source code"),
+        "the user is told what is sent"
+    );
+}
+
+#[test]
+fn explain_uses_the_messages_api_for_anthropic_and_reports_http_errors() {
+    let (url, server) = fake_llm(
+        200,
+        r#"{"content":[{"type":"text","text":"Catalogue changed."}],"stop_reason":"end_turn"}"#,
+    );
+    let out = explain_cmd(&url, "anthropic")
+        .env("ANTHROPIC_API_KEY", "sk-test")
+        .arg("--json")
+        .output()
+        .unwrap();
+    let request = server.join().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(request.starts_with("POST /v1/messages "), "{request}");
+    assert!(request.contains("x-api-key: sk-test"), "{request}");
+    assert!(
+        request.contains("\"model\":\"claude-opus-5-5\""),
+        "{request}"
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["explanation"]["provider"], "anthropic");
+    assert_eq!(json["explanation"]["text"], "Catalogue changed.");
+
+    let (url, server) = fake_llm(401, r#"{"error":{"message":"invalid x-api-key"}}"#);
+    let out = explain_cmd(&url, "anthropic")
+        .env("ANTHROPIC_API_KEY", "sk-wrong")
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("anthropic (claude-opus-5-5): HTTP 401: invalid x-api-key"),
+        "{err}"
+    );
+    assert!(out.stdout.is_empty());
+
+    let missing = explain_cmd("http://127.0.0.1:9/v1", "anthropic")
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("needs ANTHROPIC_API_KEY"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
 }

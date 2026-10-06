@@ -107,6 +107,150 @@ pub fn format_change_report(analysis: &Analysis, color: bool) -> String {
     out.join("\n")
 }
 
+/// What `vernier` prints when there is no change to walk: the header, the
+/// shape of the graph in three lines, and what to run next. The full
+/// inventory is `--full`.
+pub fn format_summary_report(analysis: &Analysis, color: bool, in_git: bool) -> String {
+    let c = Paint { color };
+    let services = analysis.graph.services();
+    let edges = analysis.graph.edges();
+    let mut out: Vec<String> = Vec::new();
+    header(analysis, &services, &c, &mut out);
+
+    out.push(c.bold("NO CHANGES"));
+    out.push(String::new());
+    let why = if in_git {
+        "No uncommitted edits and no commits since the default branch, so there is no change to walk."
+    } else {
+        "Not a git repository, so there is no change to walk."
+    };
+    out.push(format!("  {}", c.dim(why)));
+    out.push(String::new());
+
+    if analysis.discovery.strategy.is_some() {
+        let count = |conf: Confidence| edges.iter().filter(|e| e.confidence == conf).count();
+        let mut parts = Vec::new();
+        for (label, conf) in [
+            ("observed", Confidence::Observed),
+            ("static", Confidence::Static),
+            ("inferred", Confidence::Inferred),
+            ("uncertain", Confidence::Uncertain),
+        ] {
+            let n = count(conf);
+            if n > 0 {
+                parts.push(format!("{n} {label}"));
+            }
+        }
+        let noun = if edges.len() == 1 { "edge" } else { "edges" };
+        let mut line = format!("{} {noun}", edges.len());
+        if !parts.is_empty() {
+            line = format!("{line}  {}", c.dim(&format!("({})", parts.join(" · "))));
+        }
+        out.push(wide_row("Edges", &line));
+        if let Some((name, sources)) = most_connected(edges) {
+            let noun = if sources == 1 { "service" } else { "services" };
+            out.push(wide_row(
+                "Most connected",
+                &format!("{name}  {}", c.dim(&format!("touched by {sources} {noun}"))),
+            ));
+        }
+        if let Some((name, count)) =
+            blast::widest(&analysis.graph, blast::DEFAULT_DEPTH).filter(|(_, count)| *count > 0)
+        {
+            let noun = if count == 1 { "service" } else { "services" };
+            out.push(wide_row(
+                "Widest change surface",
+                &format!(
+                    "{name}  {}",
+                    c.dim(&format!("a change here reaches {count} {noun}"))
+                ),
+            ));
+        }
+        out.push(String::new());
+    }
+
+    out.push(c.bold("TRY"));
+    out.push(String::new());
+    for (command, what) in [
+        (
+            "vernier --files <path>",
+            "what a change to these files can reach",
+        ),
+        (
+            "vernier --pr <number>",
+            "what a merged or fetched pull request can reach",
+        ),
+        ("vernier --full", "every service, edge and finding"),
+        ("vernier tui", "explore the services interactively"),
+    ] {
+        out.push(format!("  {command:<24} {}", c.dim(what)));
+    }
+    out.join("\n")
+}
+
+/// EXPLANATION: what `--explain` brought back, wrapped to the report's
+/// width, with the provider and model that wrote it.
+pub fn format_explanation(e: &crate::explain::Explanation, color: bool) -> String {
+    let c = Paint { color };
+    let mut out = vec![
+        format!(
+            "{}  {}",
+            c.bold("EXPLANATION"),
+            c.dim(&format!("written by {} {}", e.provider.as_str(), e.model))
+        ),
+        String::new(),
+    ];
+    for line in e.text.lines() {
+        let line = line.trim_end();
+        if line.trim().is_empty() {
+            out.push(String::new());
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        let body = line.trim_start();
+        let hang = if body.starts_with("- ") || body.starts_with("* ") {
+            2
+        } else {
+            0
+        };
+        let first = format!("  {}", " ".repeat(indent));
+        let rest = format!("{first}{}", " ".repeat(hang));
+        let mut current = first.clone();
+        for word in body.split_whitespace() {
+            if current.len() > rest.len().max(first.len()) && current.len() + 1 + word.len() > 78 {
+                out.push(std::mem::replace(&mut current, rest.clone()));
+            }
+            if !current.trim().is_empty() {
+                current.push(' ');
+            }
+            current.push_str(word);
+        }
+        out.push(current);
+    }
+    out.push(String::new());
+    out.push(format!(
+        "  {}",
+        c.dim("Written by an LLM from the blast radius above; the radius is the evidence.")
+    ));
+    out.join("\n")
+}
+
+/// The service with the most distinct callers, and how many. Ties go to
+/// the first name.
+fn most_connected(edges: &[Edge]) -> Option<(String, usize)> {
+    let mut inbound: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for e in edges {
+        inbound
+            .entry(e.target.as_str())
+            .or_default()
+            .insert(e.source.as_str());
+    }
+    inbound
+        .iter()
+        .max_by(|a, b| a.1.len().cmp(&b.1.len()).then_with(|| b.0.cmp(a.0)))
+        .map(|(name, sources)| ((*name).to_string(), sources.len()))
+}
+
 /// Banner, the header rows, and the honest message when discovery found no
 /// service boundaries.
 fn header(analysis: &Analysis, services: &[Service], c: &Paint, out: &mut Vec<String>) {
@@ -175,6 +319,7 @@ fn change_rows(b: &Blast, c: &Paint, out: &mut Vec<String>) {
         ChangeKind::Commit => vec![format!("commit {}", ch.reference)],
         ChangeKind::Diff => vec![format!("diff {}", ch.reference)],
         ChangeKind::Files => vec![format!("{} given", ch.reference)],
+        ChangeKind::Working => vec![format!("your changes on {}", ch.reference)],
     };
     if let Some(how) = &ch.how {
         first.push(how.clone());
@@ -432,16 +577,19 @@ fn mapping_summary(analysis: &Analysis, services: &[Service], c: &Paint, out: &m
         } else {
             ""
         };
-        let noun = if m.unresolved == 1 {
-            "target"
+        // The list holds distinct names; the count every reference. Say both
+        // when they differ, so "5 targets" never sits beside four names.
+        let distinct = m.unresolved_targets.len().max(1);
+        let noun = if distinct == 1 { "target" } else { "targets" };
+        let references = if m.unresolved > distinct {
+            format!(" ({} references)", m.unresolved)
         } else {
-            "targets"
+            String::new()
         };
         out.push(format!(
             "  {}",
             c.dim(&format!(
-                "{} {noun} could not be matched to a service: {}{more}",
-                m.unresolved,
+                "{distinct} {noun}{references} could not be matched to a service: {}{more}",
                 shown.join(", ")
             ))
         ));
@@ -584,19 +732,12 @@ fn findings(
         ));
     }
     out.push(String::new());
-    if let Some((name, sources)) = inbound
-        .iter()
-        .max_by(|a, b| a.1.len().cmp(&b.1.len()).then_with(|| b.0.cmp(a.0)))
-    {
+    if let Some((name, sources)) = most_connected(edges) {
         out.push(format!("  {:<38} {name}", "Most connected"));
-        let noun = if sources.len() == 1 {
-            "service"
-        } else {
-            "services"
-        };
+        let noun = if sources == 1 { "service" } else { "services" };
         out.push(format!(
             "    {}",
-            c.dim(&format!("touched by {} {noun}", sources.len()))
+            c.dim(&format!("touched by {sources} {noun}"))
         ));
     }
     out.push(String::new());

@@ -414,7 +414,7 @@ svg.busy .node text{font-size:10px}
   }
   function showChange() {
     var c = B.change, h = '';
-    var kind = c.kind === 'pr' ? 'PR ' + c.reference : c.kind === 'diff' ? 'diff ' + c.reference : c.kind === 'commit' ? 'commit ' + c.reference : c.reference + ' given';
+    var kind = c.kind === 'pr' ? 'PR ' + c.reference : c.kind === 'diff' ? 'diff ' + c.reference : c.kind === 'commit' ? 'commit ' + c.reference : c.kind === 'working' ? 'your changes on ' + c.reference : c.reference + ' given';
     h += '<p class="name">' + esc(kind) + '</p>';
     h += '<dl class="kv">';
     if (c.how) h += '<dt>found as</dt><dd>' + esc(c.how) + '</dd>';

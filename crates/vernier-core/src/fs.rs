@@ -1,8 +1,9 @@
 //! One walk over the repository, reused by every stage.
 //!
 //! Hidden entries, the fixed ignore list and the repository's own
-//! `.gitignore` are skipped. Nothing outside the analysed directory is read,
-//! so two people analysing the same commit get the same answer.
+//! `.gitignore` are skipped, and so are test directories unless asked for.
+//! Nothing outside the analysed directory is read, so two people analysing
+//! the same commit get the same answer.
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -25,6 +26,20 @@ pub const IGNORE_DIRS: &[&str] = &[
     "obj",
 ];
 
+/// Directories that hold tests, fixtures and examples rather than the
+/// services that run in production. Skipped by default: a fixture's
+/// `docker-compose.yml` is not part of the system under analysis.
+pub const TEST_DIRS: &[&str] = &[
+    "test",
+    "tests",
+    "__tests__",
+    "e2e",
+    "fixtures",
+    "__fixtures__",
+    "testdata",
+    "examples",
+];
+
 /// Every file and directory under the root, as repository-relative POSIX
 /// paths, sorted.
 #[derive(Debug, Clone)]
@@ -35,7 +50,12 @@ pub struct FileIndex {
 }
 
 impl FileIndex {
+    /// The index without test directories.
     pub fn build(root: &Path) -> Self {
+        Self::build_with(root, false)
+    }
+
+    pub fn build_with(root: &Path, include_tests: bool) -> Self {
         let mut files = Vec::new();
         let mut dirs = Vec::new();
         let walker = WalkBuilder::new(root)
@@ -45,9 +65,17 @@ impl FileIndex {
             .git_global(false)
             .git_exclude(false)
             .follow_links(false)
-            .filter_entry(|entry| {
-                entry.depth() == 0
-                    || !IGNORE_DIRS.contains(&entry.file_name().to_string_lossy().as_ref())
+            .filter_entry(move |entry| {
+                if entry.depth() == 0 {
+                    return true;
+                }
+                let name = entry.file_name().to_string_lossy();
+                if IGNORE_DIRS.contains(&name.as_ref()) {
+                    return false;
+                }
+                include_tests
+                    || !entry.file_type().is_some_and(|t| t.is_dir())
+                    || !TEST_DIRS.contains(&name.as_ref())
             })
             .build();
         for entry in walker.flatten() {
@@ -246,6 +274,31 @@ mod tests {
             read_json(&root.join("services/checkout/package.json")).unwrap()["name"],
             "@acme/checkout"
         );
+    }
+
+    #[test]
+    fn test_directories_are_skipped_unless_asked_for() {
+        let root = std::env::temp_dir().join(format!("vernier-fs-tests-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        for file in [
+            "cart/server.js",
+            "cart/tests/server.test.js",
+            "cart/src/test/java/CartTest.java",
+            "test/fixtures/app/docker-compose.yml",
+            "examples/demo/main.go",
+            "testdata/x.json",
+            "contest/main.go",
+        ] {
+            let path = root.join(file);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, "").unwrap();
+        }
+        let ix = FileIndex::build(&root);
+        assert_eq!(ix.files(), ["cart/server.js", "contest/main.go"]);
+        assert!(!ix.dirs().iter().any(|d| d.split('/').any(|c| c == "test")));
+        let all = FileIndex::build_with(&root, true);
+        assert_eq!(all.files().len(), 7);
+        fs::remove_dir_all(&root).unwrap();
     }
 
     #[test]
