@@ -18,6 +18,11 @@ walked, and how to work on the code.
 Strategies are tried in order. The first one that finds more than one
 service with code in the repository wins.
 
+Directories named `test`, `tests`, `__tests__`, `e2e`, `fixtures`,
+`__fixtures__`, `testdata` or `examples` are not read, so a fixture's
+`docker-compose.yml` is not mistaken for part of the system and test code does
+not add edges. `--include-tests` reads them.
+
 1. **docker-compose** - each key under `services:` is a service, with `${VAR}`
    references resolved from the `.env` beside the file. `build.context` names
    its directory, or the directory of `build.dockerfile` when every service
@@ -163,6 +168,13 @@ calls a forge API; when the pull request is not there, the error says how to
 fetch it. When the analysed directory is a subdirectory of the repository,
 paths are made relative to it and files outside it are counted.
 
+With none of these, `vernier` walks your changes: the files this branch
+changed since it left the default branch (origin's `HEAD`, else `main` or
+`master`; the merge base, so other people's later commits there are not
+yours), plus uncommitted edits and untracked files that `.gitignore` does not
+exclude. With nothing changed it prints a short summary instead; `--full`
+prints the whole repository report and walks no change.
+
 Each file belongs to the service whose root holds it; the longest root wins,
 and a file under no root is listed as unowned and seeds nothing. The changed
 services seed a walk that follows these edges, to `--depth` hops (default 3):
@@ -230,6 +242,24 @@ uses the HTML report's colours; `NO_COLOR` turns them off. The TUI computes
 nothing the engine does not, and uses the terminal report's wording, including
 the fixed wording for what is not reached.
 
+## How `--explain` works
+
+`--explain` is the only part of Vernier that calls a model, and only when
+asked. After the walk, the blast radius (`blast` in the JSON: the change, the
+changed services and their files, each reached service with its path of hops
+and confidence, the services not reached) goes to the provider the user
+picked, with a fixed system prompt: summarise it for a reviewer from those
+facts only, name the uncertain links, and never say a service cannot be
+affected. Evidence snippets and source code are not sent.
+
+Anthropic is called through the Messages API; OpenAI, Gemini, Ollama and any
+OpenAI-compatible server through Chat Completions. The provider comes from
+`--llm`, else `VERNIER_LLM`, else the first of `ANTHROPIC_API_KEY`,
+`OPENAI_API_KEY` and `GEMINI_API_KEY` that is set. A missing key fails before
+the analysis runs; an HTTP error fails the command with the provider's own
+message. The reply is printed under EXPLANATION with the provider and model
+that wrote it, and is `explanation` in the JSON.
+
 ## Developing
 
 ```bash
@@ -237,7 +267,7 @@ cargo test                                # fixtures under test/fixtures, parity
 cargo fmt --check && cargo clippy --all-targets -- -D warnings
 sh scripts/corpus.sh                      # shallow-clone the eight reference repositories into corpus/
 cargo test --test corpus -- --nocapture   # discovery counts and timing on the corpus
-cargo run -q -- analyze corpus/robot-shop --files cart/server.js --html /tmp/robot-shop.html
+cargo run -q -- corpus/robot-shop --files cart/server.js --html /tmp/robot-shop.html
 cargo run -q -- tui corpus/train-ticket
 UPDATE_SNAPSHOTS=1 cargo test -p vernier-tui   # rewrite the TUI's text snapshots after a deliberate change
 ```

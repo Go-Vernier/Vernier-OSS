@@ -82,6 +82,7 @@ fn summary(b: &Blast, app: &App) -> Vec<Line<'static>> {
         ChangeKind::Diff => format!("diff {}", ch.reference),
         ChangeKind::Files if ch.reference.starts_with("service ") => ch.reference.clone(),
         ChangeKind::Files => format!("{} given", ch.reference),
+        ChangeKind::Working => format!("your changes on {}", ch.reference),
     }];
     first.extend(ch.how.clone());
     first.extend(ch.date.clone());

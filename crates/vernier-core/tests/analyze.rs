@@ -276,3 +276,44 @@ fn runtime_block_serialises_only_what_is_known() {
         serde_json::json!({ "runtime": "checkout-api", "service": "checkout", "how": "normalised" })
     );
 }
+
+#[test]
+fn summary_report_is_short_and_says_what_to_run_next() {
+    let a = analyze(&fixture("edges-http-app")).unwrap();
+    let r = format_summary_report(&a, false, true);
+    assert!(r.contains("Services      5 detected"), "{r}");
+    assert!(r.contains("NO CHANGES"), "{r}");
+    assert!(
+        r.contains("No uncommitted edits and no commits since the default branch"),
+        "{r}"
+    );
+    assert!(r.contains("Most connected"), "{r}");
+    assert!(r.contains("Widest change surface"), "{r}");
+    assert!(r.contains("vernier --full"), "{r}");
+    assert!(!r.contains("EDGES") && !r.contains("SERVICES\n"), "{r}");
+    assert!(r.lines().count() < 30, "{r}");
+
+    let outside = format_summary_report(&a, false, false);
+    assert!(outside.contains("Not a git repository"), "{outside}");
+}
+
+#[test]
+fn explanations_wrap_with_a_hanging_indent_and_name_their_author() {
+    let e = Explanation {
+        provider: Provider::Anthropic,
+        model: "claude-opus-5-5".into(),
+        text: "Cart changed.\n\n- web calls cart over http, so a change to the cart API can break the storefront and the checkout pages\n- payment is uncertain".into(),
+    };
+    let r = format_explanation(&e, false);
+    assert!(
+        r.starts_with("EXPLANATION  written by anthropic claude-opus-5-5\n\n  Cart changed.\n\n"),
+        "{r}"
+    );
+    assert!(r.contains("  - web calls cart"), "{r}");
+    assert!(
+        r.contains("\n    "),
+        "continuation lines hang under the bullet: {r}"
+    );
+    assert!(r.lines().all(|l| l.chars().count() <= 80), "{r}");
+    assert!(r.contains("  - payment is uncertain"), "{r}");
+}

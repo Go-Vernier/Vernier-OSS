@@ -5,9 +5,10 @@ its services, maps which service calls which, and shows the blast radius of a
 pull request before you merge it.
 
 ```bash
-npx @go-vernier/cli analyze .              # services, edges and findings
-npx @go-vernier/cli analyze . --pr 481     # blast radius of one pull request
-npx @go-vernier/cli tui .                  # explore it interactively
+npx @go-vernier/cli                  # what your changes on this branch can reach
+npx @go-vernier/cli --pr 481         # what one pull request can reach
+npx @go-vernier/cli --explain        # plus a plain-English summary from your own LLM key
+npx @go-vernier/cli tui              # explore it interactively
 ```
 
 Or install it: `npm install -g @go-vernier/cli`, then run `vernier`.

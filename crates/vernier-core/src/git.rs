@@ -200,6 +200,90 @@ pub fn diff(root: &Path, range: &str) -> Result<Change, GitError> {
     })
 }
 
+/// The branch a feature branch is compared with: origin's default branch,
+/// else a local or remote `main` or `master`.
+pub fn default_branch(root: &Path) -> Option<String> {
+    if let Ok(name) = run(
+        root,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    ) {
+        let name = name.trim();
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
+    ["main", "master", "origin/main", "origin/master"]
+        .into_iter()
+        .find(|name| run(root, &["rev-parse", "--verify", "--quiet", name]).is_ok())
+        .map(str::to_string)
+}
+
+/// Your changes, with nothing to name: what this branch changed since it
+/// left the default branch, plus uncommitted edits and untracked files.
+/// None outside a repository, before the first commit, and when nothing in
+/// the analysed directory changed.
+pub fn working_change(root: &Path) -> Result<Option<Change>, GitError> {
+    if !is_repository(root) || run(root, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_err() {
+        return Ok(None);
+    }
+    let prefix = prefix(root)?;
+    let branch = run(root, &["rev-parse", "--abbrev-ref", "HEAD"])?
+        .trim()
+        .to_string();
+    let head = run(root, &["rev-parse", "HEAD"])?.trim().to_string();
+    let base = default_branch(root).and_then(|name| {
+        let base = run(root, &["merge-base", "HEAD", &name]).ok()?;
+        Some((name, base.trim().to_string()))
+    });
+    let mut files = Vec::new();
+    let mut committed = false;
+    if let Some((_, base)) = base.as_ref().filter(|(_, base)| *base != head) {
+        files = lines(&run(root, &["diff", "--name-only", base, "HEAD"])?);
+        committed = !files.is_empty();
+    }
+    let mut uncommitted = lines(&run(root, &["diff", "--name-only", "HEAD"])?);
+    uncommitted.extend(lines(&run(
+        root,
+        &["ls-files", "--others", "--exclude-standard", "--full-name"],
+    )?));
+    let dirty = !uncommitted.is_empty();
+    for file in uncommitted {
+        if !files.contains(&file) {
+            files.push(file);
+        }
+    }
+    files.sort();
+    let (files, outside_root) = relative(&prefix, files);
+    if files.is_empty() {
+        return Ok(None);
+    }
+    let how = match (&base, committed) {
+        (Some((name, base)), true) => {
+            let short = base.get(..7).unwrap_or(base);
+            let mut how = format!("since {name} at {short}");
+            if dirty {
+                how.push_str(", with uncommitted edits");
+            }
+            how
+        }
+        _ => "uncommitted edits".to_string(),
+    };
+    Ok(Some(Change {
+        kind: ChangeKind::Working,
+        reference: branch,
+        how: Some(how),
+        title: None,
+        date: None,
+        files,
+        outside_root,
+    }))
+}
+
 /// The change one commit made.
 pub fn commit_change(root: &Path, prefix: &str, commit: &Commit) -> Result<Change, GitError> {
     let (files, outside_root) = relative(prefix, files_in_commit(root, commit)?);

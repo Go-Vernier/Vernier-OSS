@@ -9,6 +9,7 @@ pub mod analyze;
 pub mod blast;
 pub mod config;
 pub mod discover;
+pub mod explain;
 pub mod fs;
 pub mod git;
 pub mod graph;
@@ -21,17 +22,19 @@ pub mod runtime;
 pub mod yaml;
 
 pub use analyze::{
-    Analysis, AnalysisJson, AnalyzeError, Discovery, Runtime, RuntimeEdges, RuntimeMapping,
-    RuntimeServices, analyze, repository_name,
+    Analysis, AnalysisJson, AnalyzeError, Discovery, Options, Runtime, RuntimeEdges,
+    RuntimeMapping, RuntimeServices, analyze, analyze_with, repository_name,
 };
 pub use blast::{Blast, Change, ChangeKind, Changed, Hop, Reached, Relation, Touched};
 pub use config::{Config, ConfigError, RuntimeConfig};
+pub use explain::{Explanation, LlmConfig, Provider};
 pub use git::GitError;
 pub use graph::{BlastGraph, GraphError};
 pub use history::History;
 pub use map::MappingStats;
 pub use model::*;
 pub use report::{
-    format_change_report, format_repo_report, format_report, hop_words, runtime_words,
+    format_change_report, format_explanation, format_repo_report, format_report,
+    format_summary_report, hop_words, runtime_words,
 };
 pub use runtime::{RuntimeCall, RuntimeError, RuntimeGraph, RuntimeInput, RuntimeKind};
