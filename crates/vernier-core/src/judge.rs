@@ -32,8 +32,9 @@ For each link you are given, read the evidence files and their callers, and deci
 Verdicts: confirmed = the code really makes that call, consumes that topic or shares that table at runtime; \
 doubtful = the code does not (dead code, an unused string, a test, a different service with a similar name); \
 unclear = you cannot tell from the code (configuration decides). \
-Cite the file and line that settle each verdict. Judge only the links listed, and use the same from and to names. \
-Also give an overall risk (low, medium or high) for the change, a short summary, and up to six things the reviewer should check. \
+Cite the file and line that settle each verdict. Keep each link's why to one or two sentences. Judge only the links listed, and use the same from and to names. \
+In the blast radius JSON, a hop {from, to, relation} reads as: to <relation> from. For example {from: cart, to: web, relation: calls} means web calls cart. The links to judge are already written the natural way round; do not report a link as reversed. \
+Also give an overall risk (low, medium or high) for the change, a summary of at most three sentences and under 70 words, and up to six things the reviewer should check, each in one sentence. \
 Never claim a service is safe; a link you found no evidence for is doubtful, not harmless. \
 Do not modify any files.";
 
@@ -872,5 +873,18 @@ mod tests {
         let at = with.iter().position(|a| a == "-m").unwrap();
         assert_eq!(with[at + 1], "gpt");
         assert_eq!(with.last().map(String::as_str), Some("-"));
+    }
+
+    #[test]
+    fn system_prompt_explains_hop_orientation_and_limits() {
+        assert!(SYSTEM.contains("to <relation> from"), "{SYSTEM}");
+        assert!(
+            SYSTEM.contains("do not report a link as reversed"),
+            "{SYSTEM}"
+        );
+        assert!(SYSTEM.contains("under 70 words"), "{SYSTEM}");
+        let quoted = serde_json::to_string(SYSTEM).unwrap();
+        toml::from_str::<toml::Value>(&format!("x = {quoted}"))
+            .expect("Codex developer_instructions must stay valid TOML");
     }
 }
