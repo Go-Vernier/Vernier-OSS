@@ -145,6 +145,27 @@ pub fn which(binary: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
+/// `canonicalize` on Windows gives `\\?\C:\...`, which cmd.exe (and so the
+/// npm `.cmd` shims the agents install as) rejects as a working directory.
+/// A drive path loses that prefix; `\\?\UNC\` and other verbatim forms are
+/// left alone. Elsewhere the path is returned as it is.
+pub fn plain_path(path: &Path) -> PathBuf {
+    match path.to_str() {
+        Some(text) if cfg!(windows) => PathBuf::from(strip_verbatim_drive(text)),
+        _ => path.to_path_buf(),
+    }
+}
+
+/// `\\?\X:\rest` becomes `X:\rest`; anything else is returned unchanged.
+fn strip_verbatim_drive(path: &str) -> &str {
+    match path.strip_prefix(r"\\?\") {
+        Some(rest) if matches!(rest.as_bytes(), [drive, b':', b'\\', ..] if drive.is_ascii_alphabetic()) => {
+            rest
+        }
+        _ => path,
+    }
+}
+
 /// Ask each agent whether it is installed and signed in. A status command
 /// that fails or times out counts as signed out.
 pub fn detect() -> Vec<Status> {
@@ -441,9 +462,19 @@ impl Drop for Watchdog {
     }
 }
 
+/// `taskkill /T` (shipped with Windows) ends the agent's child processes
+/// too; `Child::kill` alone would leave them running.
 #[cfg(not(unix))]
 fn kill_tree(child: &mut Child) {
-    let _ = child.kill();
+    let killed = Command::new("taskkill")
+        .args(["/PID", &child.id().to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if !killed {
+        let _ = child.kill();
+    }
 }
 
 /// Told to the agent when vernier hands the terminal over. No double quotes
@@ -501,6 +532,7 @@ pub fn handoff_argv(
             }
         }
         Agent::Codex => {
+            argv.extend(["-C".into(), root.to_string_lossy().into_owned()]);
             // JSON strings and arrays of strings are valid TOML values.
             let quote = |v: &Value| v.to_string();
             let server_args = json!(["mcp", root.to_string_lossy()]);
@@ -566,6 +598,7 @@ fn handoff_with(
     model: Option<&str>,
     prompt: Option<&str>,
 ) -> Result<i32, AgentError> {
+    let root = &plain_path(root);
     let vernier = std::env::current_exe()
         .map_err(|e| AgentError::Failed(format!("can't locate this executable: {e}")))?;
     let tmp = fresh_temp_dir(temp_prefix)
@@ -726,6 +759,8 @@ mod tests {
             Some("hello"),
         );
         assert_eq!(codex[0], "codex");
+        let c = codex.iter().position(|a| a == "-C").unwrap();
+        assert_eq!(codex[c + 1], root.to_str().unwrap());
         let mut values = std::collections::HashMap::new();
         for (k, a) in codex.iter().enumerate() {
             if a == "-c" {
@@ -785,6 +820,29 @@ mod tests {
         assert!(a.is_dir() && b.is_dir());
         let _ = std::fs::remove_dir_all(&a);
         let _ = std::fs::remove_dir_all(&b);
+    }
+
+    #[test]
+    fn verbatim_drive_prefix_is_stripped_for_cmd() {
+        assert_eq!(
+            strip_verbatim_drive(r"\\?\C:\Users\a b\repo"),
+            r"C:\Users\a b\repo"
+        );
+        assert_eq!(strip_verbatim_drive(r"\\?\d:\"), r"d:\");
+        for unchanged in [
+            r"\\?\UNC\server\share\repo",
+            r"\\?\C:",
+            r"\\?\Volume{x}\repo",
+            r"C:\Users\repo",
+            "/home/a/repo",
+            "",
+        ] {
+            assert_eq!(strip_verbatim_drive(unchanged), unchanged);
+        }
+        assert_eq!(
+            plain_path(Path::new("/home/a/repo")),
+            Path::new("/home/a/repo")
+        );
     }
 
     #[test]

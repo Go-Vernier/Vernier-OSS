@@ -431,12 +431,13 @@ fn run_judge(
     let write_err =
         |e: std::io::Error| AgentError::Failed(format!("can't write {}: {e}", tmp.display()));
     std::fs::write(tmp.join("schema.json"), schema().to_string()).map_err(write_err)?;
-    let mut argv = judge_argv(agent, model, &analysis.root, tmp);
+    let root = agent::plain_path(&analysis.root);
+    let mut argv = judge_argv(agent, model, &root, tmp);
     argv[0] = binary.display().to_string();
     let out = agent::run_with_cleanup(
         &argv,
         &prompt(&analysis.repository, blast, links),
-        &analysis.root,
+        &root,
         Duration::from_secs(JUDGE_TIMEOUT_SECONDS),
         tmp,
     )?;
