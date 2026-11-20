@@ -941,3 +941,27 @@ fn agent_needs_a_terminal() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+#[test]
+fn dash_leading_prompt_and_model_are_refused() {
+    for (args, message) in [
+        (
+            vec!["agent", "--prompt=-x"],
+            "--prompt must not start with -",
+        ),
+        (vec!["agent", "--model=-x"], "--model must not start with -"),
+        (
+            vec!["--judge", "--judge-model=-x"],
+            "--judge-model must not start with -",
+        ),
+    ] {
+        let out = bin()
+            .args(&args)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(message), "{args:?}: {err}");
+    }
+}

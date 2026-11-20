@@ -178,6 +178,8 @@ fn run() -> anyhow::Result<()> {
             model,
             prompt,
         }) => {
+            agent::refuse_dash("--model", model.as_deref())?;
+            agent::refuse_dash("--prompt", prompt.as_deref())?;
             if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
                 anyhow::bail!("agent needs a terminal; for a one-shot verdict use vernier --judge");
             }
@@ -260,6 +262,7 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
     } else {
         None
     };
+    agent::refuse_dash("--judge-model", judge_args.judge_model.as_deref())?;
     // Likewise a missing or signed-out agent.
     let agent = match &judge_args.judge {
         Some(named) => Some(agent::choose(

@@ -17,7 +17,6 @@ use serde_json::{Value, json};
 use thiserror::Error;
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(20);
-static COUNTER: AtomicU64 = AtomicU64::new(0);
 const POLL: Duration = Duration::from_millis(50);
 /// Extra time for the readers to drain after the child is gone.
 const GRACE: Duration = Duration::from_secs(2);
@@ -365,6 +364,8 @@ fn kill_tree(child: &mut Child) {
 /// or backslashes, so it survives being quoted as a TOML string for Codex.
 pub const HANDOFF_INSTRUCTIONS: &str = "Vernier's tools are attached to this session: blast_radius, with no arguments, gives the services your changes on this branch can reach, and it also takes files, pr or diff to name another change; services lists what Vernier found; edges lists how they connect. Use them to answer questions about what a change can affect. Read the code to verify any link marked uncertain or inferred, and cite file:line. Never call a service safe just because no path to it was found.";
 
+static COUNTER: AtomicU64 = AtomicU64::new(0);
+
 /// A new, empty directory under the system temp dir. Unique and freshly
 /// created: a path that already exists is an error, so another process (or a
 /// planted directory) is never reused.
@@ -451,18 +452,44 @@ pub fn handoff(
     model: Option<&str>,
     prompt: Option<&str>,
 ) -> Result<i32, AgentError> {
+    refuse_dash("--model", model)?;
+    refuse_dash("--prompt", prompt)?;
     let binary =
         which(agent.binary()).ok_or_else(|| AgentError::NotReady(agent.install_hint().into()))?;
+    handoff_with(agent, &binary, "vernier-agent", root, model, prompt)
+}
+
+/// A value that starts with `-` would reach the agent as one of its own
+/// flags (say `--dangerously-skip-permissions`), so it is refused.
+pub fn refuse_dash(flag: &str, value: Option<&str>) -> Result<(), AgentError> {
+    match value {
+        Some(v) if v.starts_with('-') => Err(AgentError::NotReady(format!(
+            "{flag} must not start with -"
+        ))),
+        _ => Ok(()),
+    }
+}
+
+/// `handoff` with the agent binary already resolved; the temp directory is
+/// named from `temp_prefix` and always removed afterwards.
+fn handoff_with(
+    agent: Agent,
+    binary: &Path,
+    temp_prefix: &str,
+    root: &Path,
+    model: Option<&str>,
+    prompt: Option<&str>,
+) -> Result<i32, AgentError> {
     let vernier = std::env::current_exe()
         .map_err(|e| AgentError::Failed(format!("can't locate this executable: {e}")))?;
-    let tmp = fresh_temp_dir("vernier-agent")
+    let tmp = fresh_temp_dir(temp_prefix)
         .map_err(|e| AgentError::Failed(format!("can't create a temp directory: {e}")))?;
     let result = (|| {
         let config = tmp.join("mcp.json");
         std::fs::write(&config, mcp_config_json(&vernier, root).to_string())
             .map_err(|e| AgentError::Failed(format!("can't write {}: {e}", config.display())))?;
         let argv = handoff_argv(agent, &vernier, root, &config, model, prompt);
-        let status = Command::new(&binary)
+        let status = Command::new(binary)
             .args(&argv[1..])
             .env_clear()
             .envs(scrub(std::env::vars()))
@@ -653,6 +680,54 @@ mod tests {
         assert!(a.is_dir() && b.is_dir());
         let _ = std::fs::remove_dir_all(&a);
         let _ = std::fs::remove_dir_all(&b);
+    }
+
+    #[test]
+    fn dash_leading_values_are_refused() {
+        assert!(refuse_dash("--prompt", Some("what breaks?")).is_ok());
+        assert!(refuse_dash("--prompt", None).is_ok());
+        let Err(AgentError::NotReady(m)) = refuse_dash("--model", Some("-x")) else {
+            panic!("should refuse");
+        };
+        assert_eq!(m, "--model must not start with -");
+        let r = handoff(Agent::Codex, Path::new("."), None, Some("--yolo"));
+        assert!(matches!(r, Err(AgentError::NotReady(m)) if m.contains("--prompt")));
+    }
+
+    #[cfg(unix)]
+    fn leftover_dirs(prefix: &str) -> Vec<PathBuf> {
+        std::fs::read_dir(std::env::temp_dir())
+            .unwrap()
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| {
+                p.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with(prefix))
+            })
+            .collect()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handoff_returns_the_exit_code_and_cleans_up() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = test_dir("handoff");
+        let script = dir.join("fake-agent");
+        std::fs::write(&script, "#!/bin/sh\nexit 3\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let prefix = "vernier-handoff-ok";
+        let code = handoff_with(Agent::ClaudeCode, &script, prefix, &dir, None, None);
+        assert_eq!(code, Ok(3));
+        assert!(leftover_dirs(prefix).is_empty());
+
+        let plain = dir.join("not-executable");
+        std::fs::write(&plain, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&plain, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let prefix = "vernier-handoff-err";
+        let r = handoff_with(Agent::ClaudeCode, &plain, prefix, &dir, None, None);
+        assert!(matches!(r, Err(AgentError::Failed(_))), "{r:?}");
+        assert!(leftover_dirs(prefix).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]

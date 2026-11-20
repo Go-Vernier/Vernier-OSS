@@ -402,6 +402,7 @@ pub fn judge(
             "nothing to judge without a change".into(),
         ));
     };
+    agent::refuse_dash("--judge-model", model)?;
     let binary = agent::which(agent.binary())
         .ok_or_else(|| AgentError::NotReady(agent.install_hint().to_string()))?;
     let tmp = agent::fresh_temp_dir("vernier-judge")
