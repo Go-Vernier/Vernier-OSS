@@ -5,6 +5,7 @@
 //! from a change to report its blast radius.
 //! Every service and edge carries evidence and a confidence label. The JSON
 //! printed by [`Analysis::to_json`] is the contract other tools consume.
+pub mod agent;
 pub mod analyze;
 pub mod blast;
 pub mod config;
