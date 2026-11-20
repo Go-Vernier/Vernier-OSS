@@ -22,14 +22,17 @@ Vernier reads a repository, finds its services, maps which service calls
 which, and tells you what a change can affect. It combines what the code
 *could* call (static analysis) with what production *actually* calls
 (OpenTelemetry or Datadog traces). Every edge it reports points to a file and
-line, and says how sure the tool is.
+line, and says how sure the tool is. For the links it isn't sure about,
+`--judge` has your own Claude Code or Codex read the code and say which are
+real.
+
+![vernier: the blast radius of one file, then judged by Claude Code](docs/demo.gif)
 
 ## Install
 
 ```bash
 npx @go-vernier/cli                      # run it once, nothing to install
 npm install -g @go-vernier/cli           # npm
-brew install go-vernier/tap/vernier      # Homebrew, macOS and Linux
 curl -fsSL https://github.com/Go-Vernier/Vernier-OSS/releases/latest/download/install.sh | sh
 ```
 
@@ -53,6 +56,7 @@ Run it inside a repository:
 
 ```bash
 vernier                            # what your changes on this branch can reach
+vernier --judge                    # and have your Claude Code or Codex check it
 vernier tui                        # explore it interactively
 ```
 
@@ -245,7 +249,7 @@ A reached service gets the weakest label on its path.
 - **Evidence for everything.** Every service and edge points to a file and line, or a trace count.
 - **Honest about gaps.** It never says a service *cannot* be affected, only that no path was found.
 - **No telemetry.** It sends nothing anywhere unless you ask it to.
-- **Works offline.** Nothing touches the network unless you pass a URL or `--explain`.
+- **Works offline.** Nothing touches the network unless you pass a URL, `--explain` or `--judge`.
 
 ## Learn more
 

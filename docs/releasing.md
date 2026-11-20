@@ -68,6 +68,14 @@ the `next` tag on npm, and no Homebrew update.
 
 ## The README demo
 
-`docs/demo.tape` records `vernier tui` on robot-shop with
-[VHS](https://github.com/charmbracelet/vhs). Run the Demo workflow from the
-Actions tab, download the `demo` artifact, and commit it as `docs/demo.gif`.
+`docs/demo.gif` shows the blast radius of one file in robot-shop, then the
+same change judged by Claude Code. `--judge` needs a signed-in agent, so it is
+recorded locally with [VHS](https://github.com/charmbracelet/vhs) and ffmpeg,
+from the repository root with `vernier` on PATH:
+
+```bash
+vhs docs/demo-judge.tape && sh scripts/demo-gif.sh
+```
+
+`scripts/demo-gif.sh` speeds up the agent's wait. `docs/demo.tape` records
+`vernier tui` instead, and the Demo workflow runs it in CI.
