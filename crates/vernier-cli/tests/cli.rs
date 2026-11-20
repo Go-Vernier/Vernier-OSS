@@ -818,6 +818,45 @@ exit 0
     }
 
     #[test]
+    fn a_failed_judge_still_prints_the_report_and_exits_1() {
+        let dir = tmp("judge-fails");
+        write_script(
+            &dir,
+            "claude",
+            r#"case "$1" in
+  auth) echo '{"loggedIn":true}'; exit 0;;
+esac
+echo "rate limited" >&2
+exit 2
+"#,
+        );
+        let out = judge_cmd(&dir, &["--judge"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("BLAST RADIUS"), "{text}");
+        assert!(!text.contains("JUDGMENT"), "{text}");
+        let err = stderr(&out);
+        assert!(
+            err.contains("vernier: judge failed: Claude Code failed: rate limited"),
+            "{err}"
+        );
+
+        let html = dir.join("out.html");
+        let out = judge_cmd(
+            &dir,
+            &["--judge", "--json", "--html", html.to_str().unwrap()],
+        )
+        .output()
+        .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+        assert!(std::fs::read_to_string(&html).unwrap().contains("cart"));
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(json["blast"].is_object(), "{json}");
+        assert!(json.get("judgment").is_none(), "{json}");
+        assert!(stderr(&out).contains("vernier: judge failed:"));
+    }
+
+    #[test]
     fn judge_without_agents_fails_fast() {
         let dir = tmp("none");
         let out = judge_cmd(&dir, &["--judge"]).output().unwrap();

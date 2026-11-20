@@ -301,14 +301,30 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
             ),
         }
     }
-    if let Some(agent) = agent {
-        run_judge(&mut analysis, agent, judge_args.judge_model.as_deref())?;
-    }
+    // A failed judgment still leaves a report worth printing; the failure
+    // is reported, and sets the exit code, after it.
+    let judge_failed = agent
+        .and_then(|agent| run_judge(&mut analysis, agent, judge_args.judge_model.as_deref()).err());
     if let Some(out) = &html {
         std::fs::write(out, html::render(&analysis))
             .map_err(|e| anyhow::anyhow!("cannot write {}: {e}", out.display()))?;
         eprintln!("vernier: wrote {}", out.display());
     }
+    print(&analysis, json, full, no_color)?;
+    match judge_failed {
+        Some(err) => Err(anyhow::anyhow!("judge failed: {err}")),
+        None => Ok(()),
+    }
+}
+
+/// The report on stdout: JSON, or the text report with any explanation and
+/// judgment after it.
+fn print(
+    analysis: &vernier::Analysis,
+    json: bool,
+    full: bool,
+    no_color: bool,
+) -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     if json {
         writeln!(
@@ -321,9 +337,9 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
     let color =
         !no_color && std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
     let report = if analysis.blast.is_some() || full {
-        vernier::format_report(&analysis, color)
+        vernier::format_report(analysis, color)
     } else {
-        vernier::format_summary_report(&analysis, color, git::is_repository(&analysis.root))
+        vernier::format_summary_report(analysis, color, git::is_repository(&analysis.root))
     };
     writeln!(out, "{report}")?;
     if let Some(e) = &analysis.explanation {
