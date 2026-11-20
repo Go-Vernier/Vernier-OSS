@@ -244,7 +244,8 @@ the fixed wording for what is not reached.
 
 ## How `--explain` works
 
-`--explain` calls a model only when asked (so does `--judge`, below). After the walk, the blast radius (`blast` in the JSON: the change, the
+`--explain` calls a model only when asked (so does `--judge`, below). After
+the walk, the blast radius (`blast` in the JSON: the change, the
 changed services and their files, each reached service with its path of hops
 and confidence, the services not reached) goes to the provider the user
 picked, with a fixed system prompt: summarise it for a reviewer from those
@@ -264,6 +265,9 @@ that wrote it, and is `explanation` in the JSON.
 `--judge` runs the user's own Claude Code (`claude -p`) or Codex
 (`codex exec`) in the repository, read-only. It is given the inferred and
 uncertain edges (at most 20) and asked to check each against the code. The
+Vernier sends the agent the blast radius and the links to judge, each with
+its evidence file and line; the agent reads the code itself, and any verdict
+about a link Vernier didn't ask about is dropped. The
 reply is validated against a schema and printed as JUDGMENT; it is `judgment`
 in the JSON. With no uncertain edge no agent runs. `vernier agent` instead
 opens the agent interactively with Vernier's MCP server (`vernier mcp`)

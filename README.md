@@ -138,13 +138,15 @@ vernier agent --with codex --prompt "What breaks if cart goes down?"
 
 Write `--judge=codex` with an `=`. `--judge codex` with a space reads `codex`
 as the repository path. Without a value, `VERNIER_AGENT` picks the agent, and
-then the first of `claude` and `codex` that is installed and signed in. `--judge` and
-`--explain` can't be used together.
+then the first of `claude` and `codex` that is installed and signed in.
+`--judge` and `--explain` can't be used together.
 
 The report gains a JUDGMENT section: an overall risk, a short summary, a
 verdict for each link (confirmed, doubtful or unclear, with `file:line`), and
 CHECK items. It is `judgment` in `--json` and a panel in `--html`. A run takes
-about 30 to 40 seconds. If nothing is uncertain, no agent runs. From
+from about 30 seconds with Claude Code to a minute or more with Codex, and
+counts against your plan's limits. Vernier stops waiting after 10 minutes. If
+nothing is uncertain, no agent runs. From
 `vernier --files cart/server.js --judge=codex`, trimmed:
 
 ```

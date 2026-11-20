@@ -24,7 +24,8 @@ Every release of Vernier, newest first. The format follows
   choose the model and agent. No API key; it conflicts with `--explain`.
 - **`vernier agent`** opens Claude Code or Codex in the repository with
   Vernier's tools (`blast_radius`, `services`, `edges`) attached for that
-  session only. Nothing is written to your agent's configuration.
+  session only. `VERNIER_AGENT` also picks the agent here. Nothing is written
+  to your agent's configuration.
 - **`vernier mcp`** (hidden) serves those tools to coding agents over stdio.
   `vernier agent` uses it.
 - **`--full`** prints every service, edge and finding, the old default.
