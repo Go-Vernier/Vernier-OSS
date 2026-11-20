@@ -304,10 +304,12 @@ pub fn format_judgment(j: &crate::judge::Judgment, color: bool) -> String {
         }
     }
     out.push(String::new());
-    out.push(format!(
-        "  {}",
-        c.dim("Judged by an agent that read the code; it can be wrong, so verify before relying on it.")
-    ));
+    for line in [
+        "Judged by an agent that read the code.",
+        "It can be wrong; verify before relying on it.",
+    ] {
+        out.push(format!("  {}", c.dim(line)));
+    }
     out.join("\n")
 }
 

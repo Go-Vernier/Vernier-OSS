@@ -354,5 +354,11 @@ fn judgments_print_risk_summary_links_and_checks() {
     assert!(r.contains("confirmed  web -> cart  web/app.js:12"), "{r}");
     assert!(r.contains("unclear    dispatch -> payment\n"), "{r}");
     assert!(r.contains("\nCHECK\n  - Run the storefront tests"), "{r}");
-    assert!(r.lines().all(|l| l.chars().count() <= 100), "{r}");
+    assert!(
+        r.ends_with(
+            "\n  Judged by an agent that read the code.\n  It can be wrong; verify before relying on it."
+        ),
+        "{r}"
+    );
+    assert!(r.lines().all(|l| l.chars().count() <= 80), "{r}");
 }

@@ -167,7 +167,8 @@ CHECK
   - Exercise /api/cart/ against the changed cart server and verify response
     compatibility.
 
-  Judged by an agent that read the code; it can be wrong, so verify before relying on it.
+  Judged by an agent that read the code.
+  It can be wrong; verify before relying on it.
 ```
 
 `vernier agent [PATH]` opens Claude Code or Codex in the repository with
