@@ -488,7 +488,8 @@ static COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// A new, empty directory under the system temp dir. Unique and freshly
 /// created: a path that already exists is an error, so another process (or a
-/// planted directory) is never reused.
+/// planted directory) is never reused. On unix only the user can enter it:
+/// the shared temp dir must not expose the agent's answer or MCP config.
 pub fn fresh_temp_dir(prefix: &str) -> std::io::Result<PathBuf> {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -498,6 +499,9 @@ pub fn fresh_temp_dir(prefix: &str) -> std::io::Result<PathBuf> {
         std::process::id(),
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
+    #[cfg(unix)]
+    std::os::unix::fs::DirBuilderExt::mode(&mut std::fs::DirBuilder::new(), 0o700).create(&dir)?;
+    #[cfg(not(unix))]
     std::fs::create_dir(&dir)?;
     Ok(dir)
 }
@@ -823,6 +827,16 @@ mod tests {
         assert!(a.is_dir() && b.is_dir());
         let _ = std::fs::remove_dir_all(&a);
         let _ = std::fs::remove_dir_all(&b);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fresh_temp_dir_is_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = fresh_temp_dir("vernier-agent-mode").unwrap();
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(mode, 0o700, "{mode:o}");
     }
 
     #[test]
