@@ -52,6 +52,16 @@ enum Cmd {
         #[arg(long = "include-tests")]
         include_tests: bool,
     },
+    /// Serve the blast radius to a coding agent over MCP on stdio
+    #[command(hide = true)]
+    Mcp {
+        /// Repository root
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Also read test, fixture and example directories
+        #[arg(long = "include-tests")]
+        include_tests: bool,
+    },
 }
 
 #[derive(Args)]
@@ -146,6 +156,17 @@ fn run() -> anyhow::Result<()> {
     match cli.command {
         None => analyze(cli.analyze),
         Some(Cmd::Analyze(args)) => analyze(args),
+        Some(Cmd::Mcp {
+            path,
+            include_tests,
+        }) => {
+            let analysis = vernier::analyze_with(&path, vernier::Options { include_tests })?;
+            // Stdout is the protocol; the progress line goes to stderr.
+            eprintln!("vernier: serving {} over MCP", analysis.root.display());
+            vernier::mcp::Server::new(analysis)
+                .serve(std::io::stdin().lock(), std::io::stdout().lock())?;
+            Ok(())
+        }
         Some(Cmd::Tui {
             path,
             runtime,

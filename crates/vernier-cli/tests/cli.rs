@@ -874,3 +874,55 @@ exit 0
         assert!(html.contains("box.id = 'judgment'"));
     }
 }
+
+#[test]
+fn mcp_answers_initialize_and_tools_list_one_line_each() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = bin()
+        .args(["mcp", fixture("compose-app").to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            concat!(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n",
+                "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    // Stdin is dropped above, so the server reads EOF and exits 0.
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let lines: Vec<serde_json::Value> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["result"]["serverInfo"]["name"], "vernier");
+    assert_eq!(lines[1]["result"]["tools"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn mcp_fails_with_the_usual_error_on_a_missing_path() {
+    let out = bin()
+        .args(["mcp", "/definitely/not/here"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).starts_with("vernier:"));
+    assert!(out.stdout.is_empty());
+}

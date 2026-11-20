@@ -18,6 +18,7 @@ pub mod history;
 pub mod html;
 pub mod judge;
 pub mod map;
+pub mod mcp;
 pub mod model;
 pub mod report;
 pub mod runtime;
