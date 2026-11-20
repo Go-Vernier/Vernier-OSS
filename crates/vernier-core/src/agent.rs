@@ -6,8 +6,9 @@
 //! running inside another one. Prompts go on stdin, never argv, so they stay
 //! out of `ps`.
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,8 @@ use thiserror::Error;
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(20);
 const POLL: Duration = Duration::from_millis(50);
+/// Extra time for the readers to drain after the child is gone.
+const GRACE: Duration = Duration::from_secs(2);
 
 /// Variables that would change which account pays, or that mark a nested
 /// agent session.
@@ -108,15 +111,18 @@ pub fn codex_signed_in(exit_ok: bool, output: &str) -> bool {
 /// Drop the variables listed above from a parent environment.
 pub fn scrub(vars: impl Iterator<Item = (String, String)>) -> Vec<(String, String)> {
     vars.filter(|(name, _)| {
-        !SCRUB_NAMES.contains(&name.as_str()) && !SCRUB_PREFIXES.iter().any(|p| name.starts_with(p))
+        let upper = name.to_ascii_uppercase();
+        !SCRUB_NAMES.contains(&upper.as_str())
+            && !SCRUB_PREFIXES.iter().any(|p| upper.starts_with(p))
     })
     .collect()
 }
 
-fn on_path(binary: &str) -> bool {
-    let Some(path) = std::env::var_os("PATH") else {
-        return false;
-    };
+/// Resolve a binary on `PATH` to its full path. Windows needs this: npm
+/// installs agents as `.cmd` shims, which `Command::new("codex")` will not
+/// find but a full path spawns fine.
+pub fn which(binary: &str) -> Option<PathBuf> {
+    let path = std::env::var_os("PATH")?;
     let names: Vec<String> = if cfg!(windows) {
         ["exe", "cmd", "bat"]
             .iter()
@@ -125,7 +131,9 @@ fn on_path(binary: &str) -> bool {
     } else {
         vec![binary.to_string()]
     };
-    std::env::split_paths(&path).any(|dir| names.iter().any(|n| dir.join(n).is_file()))
+    std::env::split_paths(&path)
+        .flat_map(|dir| names.iter().map(move |n| dir.join(n)))
+        .find(|candidate| candidate.is_file())
 }
 
 /// Ask each agent whether it is installed and signed in. A status command
@@ -133,20 +141,22 @@ fn on_path(binary: &str) -> bool {
 pub fn detect() -> Vec<Status> {
     ALL.iter()
         .map(|&agent| {
-            if !on_path(agent.binary()) {
+            let Some(exe) = which(agent.binary()) else {
                 return Status {
                     agent,
                     installed: false,
                     signed_in: false,
                 };
-            }
-            let argv: Vec<String> = match agent {
-                Agent::ClaudeCode => vec!["claude", "auth", "status", "--json"],
-                Agent::Codex => vec!["codex", "login", "status"],
-            }
-            .into_iter()
-            .map(String::from)
-            .collect();
+            };
+            let mut argv = vec![exe.to_string_lossy().into_owned()];
+            argv.extend(
+                match agent {
+                    Agent::ClaudeCode => ["auth", "status", "--json"].as_slice(),
+                    Agent::Codex => ["login", "status"].as_slice(),
+                }
+                .iter()
+                .map(|a| (*a).to_string()),
+            );
             let signed_in =
                 run(&argv, "", Path::new("."), STATUS_TIMEOUT).is_ok_and(|out| match agent {
                     Agent::ClaudeCode => claude_signed_in(&out.stdout),
@@ -258,7 +268,7 @@ pub fn run_in(
     // block us. A closed pipe just means it did not want the input.
     let input = stdin.as_bytes().to_vec();
     let mut pipe = child.stdin.take();
-    let writer = thread::spawn(move || {
+    thread::spawn(move || {
         if let Some(pipe) = pipe.as_mut() {
             let _ = pipe.write_all(&input);
         }
@@ -273,38 +283,51 @@ pub fn run_in(
             Ok(None) if start.elapsed() >= timeout => {
                 kill_tree(&mut child);
                 let _ = child.wait();
-                let _ = writer.join();
-                let _ = out.join();
-                let _ = err.join();
-                return Err(AgentError::Timeout(format!(
-                    "vernier: {program} timed out after {}s",
-                    timeout.as_secs()
-                )));
+                return Err(AgentError::Timeout(timed_out(program, timeout)));
             }
             Ok(None) => thread::sleep(POLL),
             Err(e) => {
+                kill_tree(&mut child);
+                let _ = child.wait();
                 return Err(AgentError::Failed(format!(
                     "vernier: waiting for {program}: {e}"
                 )));
             }
         }
     };
-    let _ = writer.join();
+    // A descendant that outlived the child may still hold the pipes open and
+    // would stall the readers; end the whole group, then bound the wait.
+    kill_tree(&mut child);
+    let deadline = (start + timeout).max(Instant::now()) + GRACE;
+    let (Some(stdout), Some(stderr)) = (collect(&out, deadline), collect(&err, deadline)) else {
+        return Err(AgentError::Timeout(timed_out(program, timeout)));
+    };
     Ok(RunOutput {
         status_ok: status.success(),
-        stdout: out.join().unwrap_or_default(),
-        stderr: err.join().unwrap_or_default(),
+        stdout,
+        stderr,
     })
 }
 
-fn reader<R: Read + Send + 'static>(stream: Option<R>) -> thread::JoinHandle<String> {
+fn timed_out(program: &str, timeout: Duration) -> String {
+    format!("vernier: {program} timed out after {}s", timeout.as_secs())
+}
+
+fn collect(rx: &mpsc::Receiver<String>, deadline: Instant) -> Option<String> {
+    rx.recv_timeout(deadline.saturating_duration_since(Instant::now()))
+        .ok()
+}
+
+fn reader<R: Read + Send + 'static>(stream: Option<R>) -> mpsc::Receiver<String> {
+    let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
         let mut bytes = Vec::new();
         if let Some(mut stream) = stream {
             let _ = stream.read_to_end(&mut bytes);
         }
-        String::from_utf8_lossy(&bytes).into_owned()
-    })
+        let _ = tx.send(String::from_utf8_lossy(&bytes).into_owned());
+    });
+    rx
 }
 
 #[cfg(unix)]
@@ -354,6 +377,7 @@ mod tests {
                 "OPENAI_API_KEY",
                 "CLAUDECODE",
                 "CLAUDE_CODE_ENTRYPOINT",
+                "Anthropic_Api_Key",
                 "PATH",
             ])
             .into_iter(),
@@ -407,11 +431,23 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn run_kills_a_hung_child() {
-        let argv = ["sh", "-c", "sleep 30"].map(String::from);
+        let argv = ["sh", "-c", "sleep 30 & wait"].map(String::from);
         let start = Instant::now();
         let result = run(&argv, "", Path::new("."), Duration::from_secs(1));
         assert!(matches!(result, Err(AgentError::Timeout(_))), "{result:?}");
         assert!(start.elapsed() < Duration::from_secs(5));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn run_returns_when_a_grandchild_holds_the_pipe() {
+        let argv = ["sh", "-c", "(sleep 30 &) ; echo done"].map(String::from);
+        let start = Instant::now();
+        let out = run(&argv, "", Path::new("."), Duration::from_secs(1));
+        assert!(start.elapsed() < Duration::from_secs(6), "{out:?}");
+        if let Ok(out) = out {
+            assert_eq!(out.stdout, "done\n");
+        }
     }
 
     #[cfg(unix)]
