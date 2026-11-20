@@ -40,6 +40,9 @@ pub enum AgentError {
     Failed(String),
     #[error("{0}")]
     Timeout(String),
+    /// A value the user passed that vernier refuses to hand to the agent.
+    #[error("{0}")]
+    BadInput(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -324,7 +327,7 @@ fn run_watched(
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let mut child = command
         .spawn()
-        .map_err(|e| AgentError::Failed(format!("could not start {program}: {e}")))?;
+        .map_err(|e| AgentError::Failed(format!("can't start {program}: {e}")))?;
     let _watchdog = Watchdog(spawn_watchdog(std::process::id(), child.id(), cleanup));
 
     // Feed stdin from its own thread: a child that never reads it must not
@@ -581,7 +584,7 @@ pub fn handoff(
 /// flags (say `--dangerously-skip-permissions`), so it is refused.
 pub fn refuse_dash(flag: &str, value: Option<&str>) -> Result<(), AgentError> {
     match value {
-        Some(v) if v.starts_with('-') => Err(AgentError::NotReady(format!(
+        Some(v) if v.starts_with('-') => Err(AgentError::BadInput(format!(
             "{flag} must not start with -"
         ))),
         _ => Ok(()),
@@ -849,12 +852,12 @@ mod tests {
     fn dash_leading_values_are_refused() {
         assert!(refuse_dash("--prompt", Some("what breaks?")).is_ok());
         assert!(refuse_dash("--prompt", None).is_ok());
-        let Err(AgentError::NotReady(m)) = refuse_dash("--model", Some("-x")) else {
+        let Err(AgentError::BadInput(m)) = refuse_dash("--model", Some("-x")) else {
             panic!("should refuse");
         };
         assert_eq!(m, "--model must not start with -");
         let r = handoff(Agent::Codex, Path::new("."), None, Some("--yolo"));
-        assert!(matches!(r, Err(AgentError::NotReady(m)) if m.contains("--prompt")));
+        assert!(matches!(r, Err(AgentError::BadInput(m)) if m.contains("--prompt")));
     }
 
     #[cfg(unix)]
@@ -933,6 +936,19 @@ mod tests {
         let alive = process_alive(&pid);
         std::fs::remove_dir_all(&dir).unwrap();
         assert!(!alive, "grandchild {pid} survived the timeout");
+    }
+
+    #[test]
+    fn a_missing_program_cannot_start() {
+        let argv = ["/definitely/not/here/agent".to_string()];
+        let r = run(&argv, "", Path::new("."), Duration::from_secs(5));
+        let Err(AgentError::Failed(m)) = r else {
+            panic!("{r:?}");
+        };
+        assert!(
+            m.starts_with("can't start /definitely/not/here/agent: "),
+            "{m}"
+        );
     }
 
     #[cfg(unix)]

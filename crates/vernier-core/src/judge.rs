@@ -416,7 +416,19 @@ pub fn judge(
         .map_err(|e| AgentError::Failed(format!("can't create a temp directory: {e}")))?;
     let result = run_judge(agent, model, analysis, blast, links, &binary, &tmp);
     let _ = std::fs::remove_dir_all(&tmp);
-    result
+    result.map_err(|e| name_the_agent(agent, e))
+}
+
+/// A timeout names the agent ("Claude Code timed out after 600s"), not the
+/// resolved path of its binary.
+fn name_the_agent(agent: Agent, err: AgentError) -> AgentError {
+    match err {
+        AgentError::Timeout(_) => AgentError::Timeout(format!(
+            "{} timed out after {JUDGE_TIMEOUT_SECONDS}s",
+            agent.label()
+        )),
+        other => other,
+    }
 }
 
 fn run_judge(
@@ -900,6 +912,17 @@ mod tests {
         let at = with.iter().position(|a| a == "-m").unwrap();
         assert_eq!(with[at + 1], "gpt");
         assert_eq!(with.last().map(String::as_str), Some("-"));
+    }
+
+    #[test]
+    fn a_timeout_names_the_agent_not_its_path() {
+        let raw = AgentError::Timeout("/opt/homebrew/bin/claude timed out after 600s".into());
+        assert_eq!(
+            name_the_agent(Agent::ClaudeCode, raw).to_string(),
+            "Claude Code timed out after 600s"
+        );
+        let other = || AgentError::Failed("Codex failed: x".into());
+        assert_eq!(name_the_agent(Agent::Codex, other()), other());
     }
 
     #[test]
