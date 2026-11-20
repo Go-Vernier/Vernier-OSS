@@ -249,7 +249,7 @@ A reached service gets the weakest label on its path.
 - **Evidence for everything.** Every service and edge points to a file and line, or a trace count.
 - **Honest about gaps.** It never says a service *cannot* be affected, only that no path was found.
 - **No telemetry.** It sends nothing anywhere unless you ask it to.
-- **Works offline.** Nothing touches the network unless you pass a URL or `--explain`.
+- **Works offline.** Nothing touches the network unless you pass a URL, `--explain` or `--judge`.
 
 ## Learn more
 
