@@ -467,4 +467,16 @@ mod tests {
         assert!(reply.get("error").is_none());
         assert_eq!(reply["result"]["isError"], true);
     }
+
+    #[test]
+    fn a_diff_with_an_option_is_a_tool_error_and_writes_nothing() {
+        let mut s = server("compose-app");
+        let out = std::env::temp_dir().join(format!("vernier-mcp-pwn-{}", std::process::id()));
+        let _ = std::fs::remove_file(&out);
+        let diff = format!("--output={} HEAD~1 HEAD", out.display());
+        let r = call(&mut s, "blast_radius", &json!({ "diff": diff }));
+        assert_eq!(r["isError"], true);
+        assert!(text(&r).contains("not options"), "{}", text(&r));
+        assert!(!out.exists());
+    }
 }
