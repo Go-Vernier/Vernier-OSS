@@ -804,6 +804,20 @@ exit 0
     }
 
     #[test]
+    fn bare_judge_honours_vernier_agent() {
+        let dir = tmp("env-codex");
+        fake_agents(&dir, Some(VERDICT), Some(VERDICT));
+        let out = judge_cmd(&dir, &["--judge", "--json"])
+            .env("VERNIER_AGENT", "codex")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(json["judgment"]["agent"], "codex");
+        assert!(!dir.join("claude.args").exists());
+    }
+
+    #[test]
     fn judge_without_agents_fails_fast() {
         let dir = tmp("none");
         let out = judge_cmd(&dir, &["--judge"]).output().unwrap();
@@ -831,6 +845,7 @@ exit 0
                 "--judge",
             ])
             .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+            .env_remove("VERNIER_AGENT")
             .output()
             .unwrap();
         assert!(out.status.success(), "{}", stderr(&out));
@@ -846,13 +861,21 @@ exit 0
 
     #[test]
     fn judge_conflicts_with_explain() {
-        let out = bin().args(["--judge", "--explain"]).output().unwrap();
+        let out = bin()
+            .args(["--judge", "--explain"])
+            .env_remove("VERNIER_AGENT")
+            .output()
+            .unwrap();
         assert_eq!(out.status.code(), Some(2));
     }
 
     #[test]
     fn judge_model_needs_judge() {
-        let out = bin().args(["--judge-model", "opus"]).output().unwrap();
+        let out = bin()
+            .args(["--judge-model", "opus"])
+            .env_remove("VERNIER_AGENT")
+            .output()
+            .unwrap();
         assert_eq!(out.status.code(), Some(2));
     }
 
@@ -931,6 +954,7 @@ fn mcp_fails_with_the_usual_error_on_a_missing_path() {
 fn agent_needs_a_terminal() {
     let out = bin()
         .arg("agent")
+        .env_remove("VERNIER_AGENT")
         .stdin(std::process::Stdio::null())
         .output()
         .unwrap();
@@ -957,6 +981,7 @@ fn dash_leading_prompt_and_model_are_refused() {
     ] {
         let out = bin()
             .args(&args)
+            .env_remove("VERNIER_AGENT")
             .stdin(std::process::Stdio::null())
             .output()
             .unwrap();

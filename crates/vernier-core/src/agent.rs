@@ -185,16 +185,14 @@ pub fn detect() -> Vec<Status> {
 /// Pick the agent: an explicit name beats `VERNIER_AGENT`, which beats the
 /// first one that is installed and signed in. An explicit choice that is not
 /// ready is an error rather than a silent fallback, so the user never gets
-/// an answer from an agent they did not ask for.
+/// an answer from an agent they did not ask for. A blank name (bare
+/// `--judge` arrives as `""`) counts as no name.
 pub fn choose(
     named: Option<&str>,
     env_choice: Option<&str>,
     statuses: &[Status],
 ) -> Result<Agent, AgentError> {
-    let wanted = named
-        .or(env_choice)
-        .map(str::trim)
-        .filter(|n| !n.is_empty());
+    let wanted = wanted(named, env_choice);
     if let Some(name) = wanted {
         let agent = Agent::parse(name).ok_or_else(|| {
             AgentError::NotReady(format!(
@@ -230,6 +228,13 @@ pub fn choose(
                 Agent::Codex.install_hint(),
             ))
         })
+}
+
+/// The name asked for, if any: a non-blank `named`, else a non-blank
+/// `env_choice`.
+pub fn wanted<'a>(named: Option<&'a str>, env_choice: Option<&'a str>) -> Option<&'a str> {
+    let present = |n: Option<&'a str>| n.map(str::trim).filter(|n| !n.is_empty());
+    present(named).or_else(|| present(env_choice))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -560,6 +565,18 @@ mod tests {
         };
         assert!(message.contains("claude auth login"), "{message}");
         assert_eq!(choose(None, Some("codex"), &statuses), Ok(Agent::Codex));
+        // Bare `--judge` arrives as "": the env var must still apply.
+        assert_eq!(choose(Some(""), Some("codex"), &statuses), Ok(Agent::Codex));
+        assert_eq!(
+            choose(Some("  "), Some("codex"), &statuses),
+            Ok(Agent::Codex)
+        );
+        let both = [
+            status(Agent::ClaudeCode, true, true),
+            status(Agent::Codex, true, true),
+        ];
+        assert_eq!(choose(Some(""), Some("codex"), &both), Ok(Agent::Codex));
+        assert_eq!(choose(Some(""), Some(" "), &both), Ok(Agent::ClaudeCode));
 
         let none_ready = [
             status(Agent::ClaudeCode, false, false),
