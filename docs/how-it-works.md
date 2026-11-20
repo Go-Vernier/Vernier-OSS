@@ -263,15 +263,16 @@ that wrote it, and is `explanation` in the JSON.
 ## How `--judge` works
 
 `--judge` runs the user's own Claude Code (`claude -p`) or Codex
-(`codex exec`) in the repository, read-only. It is given the inferred and
-uncertain edges (at most 20) and asked to check each against the code. The
-Vernier sends the agent the blast radius and the links to judge, each with
-its evidence file and line; the agent reads the code itself, and any verdict
-about a link Vernier didn't ask about is dropped. The
-reply is validated against a schema and printed as JUDGMENT; it is `judgment`
-in the JSON. With no uncertain edge no agent runs. `vernier agent` instead
-opens the agent interactively with Vernier's MCP server (`vernier mcp`)
-attached for that session only.
+(`codex exec`) in the repository, read-only, and asks it to check the
+inferred and uncertain links (at most 20) against the code. Vernier sends
+the agent the blast radius and the links to judge, each with its evidence
+file and line; the agent reads the code itself, and any verdict about a link
+Vernier didn't ask about is dropped. Claude Code loads only the user's own
+settings, with hooks off, so a repository's `.claude/settings.json` can't
+run anything during the judgment. The reply is validated against a schema
+and printed as JUDGMENT; it is `judgment` in the JSON. With no uncertain
+link no agent runs. `vernier agent` instead opens the agent interactively
+with Vernier's MCP server (`vernier mcp`) attached for that session only.
 
 ## Developing
 
