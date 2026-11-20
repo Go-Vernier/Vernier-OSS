@@ -9,9 +9,11 @@ use thiserror::Error;
 
 use crate::blast::Blast;
 use crate::discover::{DiscoveryAttempt, discover_services};
+use crate::explain::Explanation;
 use crate::fs::{FileIndex, is_dir};
 use crate::graph::BlastGraph;
 use crate::history::History;
+use crate::judge::Judgment;
 use crate::map::{self, MappingStats};
 use crate::model::{DiscoveryStrategy, Edge, RuntimeSource, Service};
 
@@ -87,6 +89,10 @@ pub struct Analysis {
     /// Stage 4 fills these in when a change or a history was asked for.
     pub blast: Option<Blast>,
     pub history: Option<History>,
+    /// Filled in by `--explain`.
+    pub explanation: Option<Explanation>,
+    /// Filled in by the agent judge.
+    pub judgment: Option<Judgment>,
 }
 
 /// The JSON contract. Field order is part of it.
@@ -104,6 +110,10 @@ pub struct AnalysisJson {
     pub blast: Option<Blast>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub history: Option<History>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub explanation: Option<Explanation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judgment: Option<Judgment>,
 }
 
 impl Analysis {
@@ -118,16 +128,30 @@ impl Analysis {
             runtime: self.runtime.clone(),
             blast: self.blast.clone(),
             history: self.history.clone(),
+            explanation: self.explanation.clone(),
+            judgment: self.judgment.clone(),
         }
     }
 }
 
+/// What to read. The default skips test directories.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Options {
+    /// Read `test/`, `fixtures/`, `examples/` and the rest of
+    /// [`crate::fs::TEST_DIRS`] as well.
+    pub include_tests: bool,
+}
+
 pub fn analyze(root: &Path) -> Result<Analysis, AnalyzeError> {
+    analyze_with(root, Options::default())
+}
+
+pub fn analyze_with(root: &Path, options: Options) -> Result<Analysis, AnalyzeError> {
     if !is_dir(root) {
         return Err(AnalyzeError::NotADirectory(root.display().to_string()));
     }
     let root = root.canonicalize()?;
-    let index = FileIndex::build(&root);
+    let index = FileIndex::build_with(&root, options.include_tests);
     let discovery = discover_services(&root, &index);
 
     let mapped = map::run(&root, &index, &discovery.services);
@@ -154,6 +178,8 @@ pub fn analyze(root: &Path) -> Result<Analysis, AnalyzeError> {
         runtime: Runtime::default(),
         blast: None,
         history: None,
+        explanation: None,
+        judgment: None,
     })
 }
 

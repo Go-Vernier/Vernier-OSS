@@ -276,3 +276,89 @@ fn runtime_block_serialises_only_what_is_known() {
         serde_json::json!({ "runtime": "checkout-api", "service": "checkout", "how": "normalised" })
     );
 }
+
+#[test]
+fn summary_report_is_short_and_says_what_to_run_next() {
+    let a = analyze(&fixture("edges-http-app")).unwrap();
+    let r = format_summary_report(&a, false, true);
+    assert!(r.contains("Services      5 detected"), "{r}");
+    assert!(r.contains("NO CHANGES"), "{r}");
+    assert!(
+        r.contains("No uncommitted edits and no commits since the default branch"),
+        "{r}"
+    );
+    assert!(r.contains("Most connected"), "{r}");
+    assert!(r.contains("Widest change surface"), "{r}");
+    assert!(r.contains("vernier --full"), "{r}");
+    assert!(!r.contains("EDGES") && !r.contains("SERVICES\n"), "{r}");
+    assert!(r.lines().count() < 30, "{r}");
+
+    let outside = format_summary_report(&a, false, false);
+    assert!(outside.contains("Not a git repository"), "{outside}");
+}
+
+#[test]
+fn explanations_wrap_with_a_hanging_indent_and_name_their_author() {
+    let e = Explanation {
+        provider: Provider::Anthropic,
+        model: "claude-opus-5-5".into(),
+        text: "Cart changed.\n\n- web calls cart over http, so a change to the cart API can break the storefront and the checkout pages\n- payment is uncertain".into(),
+    };
+    let r = format_explanation(&e, false);
+    assert!(
+        r.starts_with("EXPLANATION  written by anthropic claude-opus-5-5\n\n  Cart changed.\n\n"),
+        "{r}"
+    );
+    assert!(r.contains("  - web calls cart"), "{r}");
+    assert!(
+        r.contains("\n    "),
+        "continuation lines hang under the bullet: {r}"
+    );
+    assert!(r.lines().all(|l| l.chars().count() <= 80), "{r}");
+    assert!(r.contains("  - payment is uncertain"), "{r}");
+}
+
+#[test]
+fn judgments_print_risk_summary_links_and_checks() {
+    use vernier::judge::{Judgment, LinkVerdict, Risk, Verdict};
+    let j = Judgment {
+        agent: "claude-code".into(),
+        model: None,
+        risk: Risk::Medium,
+        summary: "The cart API change can break the storefront.".into(),
+        links: vec![
+            LinkVerdict {
+                from: "web".into(),
+                to: "cart".into(),
+                verdict: Verdict::Confirmed,
+                why: "web/app.js fetches the cart endpoint on every page load".into(),
+                file: Some("web/app.js".into()),
+                line: Some(12),
+            },
+            LinkVerdict {
+                from: "dispatch".into(),
+                to: "payment".into(),
+                verdict: Verdict::Unclear,
+                why: "not judged".into(),
+                file: None,
+                line: None,
+            },
+        ],
+        check: vec!["Run the storefront tests against the new cart API".into()],
+    };
+    let r = format_judgment(&j, false);
+    assert!(
+        r.starts_with("JUDGMENT  risk medium \u{b7} by Claude Code\n"),
+        "{r}"
+    );
+    assert!(r.contains("confirmed  web -> cart  web/app.js:12"), "{r}");
+    assert!(r.contains("unclear    dispatch -> payment\n"), "{r}");
+    assert!(r.contains("\nCHECK\n  - Run the storefront tests"), "{r}");
+    assert!(
+        r.ends_with(
+            "\n  Judged by an agent that read the code.\n  It can be wrong; verify before relying on it."
+        ),
+        "{r}"
+    );
+    assert!(r.lines().all(|l| l.chars().count() <= 80), "{r}");
+}

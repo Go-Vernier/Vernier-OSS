@@ -114,6 +114,7 @@ fn otel_flag_joins_a_servicegraph_scrape() {
             fixture("runtime-app").to_str().unwrap(),
             "--otel",
             &runtime_fixture("traces.prom"),
+            "--full",
         ])
         .output()
         .unwrap();
@@ -437,4 +438,671 @@ fn tui_shares_the_change_flags_with_analyze() {
         .unwrap();
     assert_eq!(out.status.code(), Some(2));
     assert!(String::from_utf8_lossy(&out.stderr).contains("cannot be used with"));
+}
+
+#[test]
+fn bare_vernier_walks_your_changes_or_prints_a_short_summary() {
+    let root = repo("bare");
+    let run = |args: &[&str]| {
+        let out = bin().args(args).current_dir(&root).output().unwrap();
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    };
+
+    let clean = run(&[]);
+    assert!(clean.contains("NO CHANGES"), "{clean}");
+    assert!(clean.contains("vernier --full"), "{clean}");
+    assert!(!clean.contains("EDGES"), "{clean}");
+
+    std::fs::write(root.join("catalogue/main.go"), "package main // edited\n").unwrap();
+    let dirty = run(&[]);
+    assert!(
+        dirty.contains("Change        your changes on main  uncommitted edits"),
+        "{dirty}"
+    );
+    assert!(
+        dirty.contains("1 service changed -> 4 services in the blast radius"),
+        "{dirty}"
+    );
+    assert_eq!(run(&["analyze"]), dirty, "analyze is the same command");
+
+    let full = run(&["--full"]);
+    assert!(
+        full.contains("SERVICES") && full.contains("EDGES"),
+        "{full}"
+    );
+    assert!(!full.contains("BLAST RADIUS"), "{full}");
+
+    let json: serde_json::Value = serde_json::from_str(&run(&["--json"])).unwrap();
+    assert_eq!(json["blast"]["change"]["kind"], "working");
+    assert_eq!(
+        json["blast"]["change"]["files"],
+        serde_json::json!(["catalogue/main.go"])
+    );
+
+    let both = bin()
+        .args(["--full", "--files", "a"])
+        .current_dir(&root)
+        .output()
+        .unwrap();
+    assert_eq!(both.status.code(), Some(2), "--full names no change");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+/// A one-request HTTP server on a free port. Returns its base URL and a
+/// handle yielding the raw request it received.
+fn fake_llm(status: u16, body: &'static str) -> (String, std::thread::JoinHandle<String>) {
+    use std::io::{BufRead, BufReader, Read, Write};
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let url = format!("http://{}/v1", listener.local_addr().unwrap());
+    let handle = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut reader = BufReader::new(stream.try_clone().unwrap());
+        let mut head = String::new();
+        let mut length = 0;
+        loop {
+            let mut line = String::new();
+            reader.read_line(&mut line).unwrap();
+            if let Some(v) = line.to_ascii_lowercase().strip_prefix("content-length:") {
+                length = v.trim().parse().unwrap();
+            }
+            head.push_str(&line);
+            if line == "\r\n" {
+                break;
+            }
+        }
+        let mut payload = vec![0; length];
+        reader.read_exact(&mut payload).unwrap();
+        write!(
+            stream,
+            "HTTP/1.1 {status} X\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .unwrap();
+        head + &String::from_utf8(payload).unwrap()
+    });
+    (url, handle)
+}
+
+fn explain_cmd(url: &str, provider: &str) -> Command {
+    let mut cmd = bin();
+    cmd.args([
+        "analyze",
+        fixture("edges-http-app").to_str().unwrap(),
+        "--files",
+        "catalogue/main.go",
+        "--explain",
+    ])
+    .env_remove("ANTHROPIC_API_KEY")
+    .env_remove("OPENAI_API_KEY")
+    .env_remove("GEMINI_API_KEY")
+    .env_remove("VERNIER_LLM_MODEL")
+    .env("VERNIER_LLM", provider)
+    .env("VERNIER_LLM_URL", url);
+    cmd
+}
+
+#[test]
+fn explain_sends_the_blast_radius_to_an_openai_compatible_server() {
+    let (url, server) = fake_llm(
+        200,
+        r#"{"choices":[{"message":{"role":"assistant","content":"- catalogue changed\n- web, ratings and payment call it"}}]}"#,
+    );
+    let out = explain_cmd(&url, "openai-compatible")
+        .env("VERNIER_LLM_MODEL", "local-model")
+        .env("VERNIER_LLM_API_KEY", "secret-k")
+        .output()
+        .unwrap();
+    let request = server.join().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        request.starts_with("POST /v1/chat/completions "),
+        "{request}"
+    );
+    assert!(
+        request
+            .to_ascii_lowercase()
+            .contains("authorization: bearer secret-k"),
+        "{request}"
+    );
+    assert!(request.contains("\"model\":\"local-model\""), "{request}");
+    assert!(request.contains("catalogue/main.go"), "{request}");
+    assert!(
+        !request.contains("http://catalogue:8080"),
+        "no evidence snippets leave the machine: {request}"
+    );
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("BLAST RADIUS"), "{text}");
+    assert!(
+        text.contains("EXPLANATION  written by openai-compatible local-model"),
+        "{text}"
+    );
+    assert!(
+        text.contains("  - web, ratings and payment call it"),
+        "{text}"
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("no source code"),
+        "the user is told what is sent"
+    );
+}
+
+#[test]
+fn explain_uses_the_messages_api_for_anthropic_and_reports_http_errors() {
+    let (url, server) = fake_llm(
+        200,
+        r#"{"content":[{"type":"text","text":"Catalogue changed."}],"stop_reason":"end_turn"}"#,
+    );
+    let out = explain_cmd(&url, "anthropic")
+        .env("ANTHROPIC_API_KEY", "sk-test")
+        .arg("--json")
+        .output()
+        .unwrap();
+    let request = server.join().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(request.starts_with("POST /v1/messages "), "{request}");
+    assert!(request.contains("x-api-key: sk-test"), "{request}");
+    assert!(
+        request.contains("\"model\":\"claude-opus-5-5\""),
+        "{request}"
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["explanation"]["provider"], "anthropic");
+    assert_eq!(json["explanation"]["text"], "Catalogue changed.");
+
+    let (url, server) = fake_llm(401, r#"{"error":{"message":"invalid x-api-key"}}"#);
+    let out = explain_cmd(&url, "anthropic")
+        .env("ANTHROPIC_API_KEY", "sk-wrong")
+        .output()
+        .unwrap();
+    server.join().unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        err.contains("anthropic (claude-opus-5-5): HTTP 401: invalid x-api-key"),
+        "{err}"
+    );
+    assert!(out.stdout.is_empty());
+
+    let missing = explain_cmd("http://127.0.0.1:9/v1", "anthropic")
+        .output()
+        .unwrap();
+    assert_eq!(missing.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&missing.stderr).contains("needs ANTHROPIC_API_KEY"),
+        "{}",
+        String::from_utf8_lossy(&missing.stderr)
+    );
+}
+
+#[cfg(unix)]
+mod judge {
+    use super::{bin, fixture};
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+    use std::process::{Command, Output};
+
+    const VERDICT: &str = r#"{"risk":"high","summary":"Web talks to cart.","links":[{"from":"web","to":"cart","verdict":"confirmed","why":"nginx proxies to cart","file":"web/default.conf.template","line":3}],"check":["run the web tests"]}"#;
+
+    fn write_script(dir: &Path, name: &str, body: &str) {
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    /// Fake `claude`/`codex`: they answer the sign-in checks and, only for a
+    /// judge run (`-p` / `exec`), record argv, stdin and secrets to files.
+    fn fake_agents(dir: &Path, claude_json: Option<&str>, codex_json: Option<&str>) {
+        if let Some(json) = claude_json {
+            let envelope = serde_json::json!({
+                "type": "result", "subtype": "success", "is_error": false,
+                "result": "done",
+                "structured_output": serde_json::from_str::<serde_json::Value>(json).unwrap(),
+            });
+            write_script(
+                dir,
+                "claude",
+                &format!(
+                    r#"d="{d}"
+case "$1" in
+  auth) touch "$d/claude.auth"; echo '{{"loggedIn":true,"authMethod":"claude.ai"}}'; exit 0;;
+esac
+for a in "$@"; do if [ "$a" = "-p" ]; then
+  echo "$@" > "$d/claude.args"
+  cat > "$d/claude.stdin"
+  echo "key=${{ANTHROPIC_API_KEY-unset}} cc=${{CLAUDECODE-unset}}" > "$d/claude.env"
+  cat <<'EOF_JSON'
+{envelope}
+EOF_JSON
+  exit 0
+fi; done
+exit 0
+"#,
+                    d = dir.display()
+                ),
+            );
+        }
+        if let Some(json) = codex_json {
+            write_script(
+                dir,
+                "codex",
+                &format!(
+                    r#"d="{d}"
+case "$1" in
+  login) touch "$d/codex.login"; echo "Logged in using ChatGPT"; exit 0;;
+  exec)
+    echo "$@" > "$d/codex.args"
+    cat > "$d/codex.stdin"
+    echo "key=${{OPENAI_API_KEY-unset}}" > "$d/codex.env"
+    out=""; prev=""
+    for a in "$@"; do if [ "$prev" = "-o" ]; then out="$a"; fi; prev="$a"; done
+    cat > "$out" <<'EOF_JSON'
+{json}
+EOF_JSON
+    exit 0;;
+esac
+exit 0
+"#,
+                    d = dir.display()
+                ),
+            );
+        }
+    }
+
+    fn judge_cmd(dir: &Path, args: &[&str]) -> Command {
+        let mut cmd = bin();
+        cmd.arg(fixture("edges-http-app"))
+            .args(["--files", "cart/server.js", "--no-color"])
+            .args(args)
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+            .env("ANTHROPIC_API_KEY", "sk-secret")
+            .env("OPENAI_API_KEY", "sk-secret")
+            .env("CLAUDECODE", "1")
+            .env_remove("VERNIER_AGENT");
+        cmd
+    }
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("vernier-cli-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    fn stderr(out: &Output) -> String {
+        String::from_utf8_lossy(&out.stderr).into_owned()
+    }
+
+    #[test]
+    fn judge_with_claude_prints_judgment_and_json() {
+        let dir = tmp("claude");
+        fake_agents(&dir, Some(VERDICT), None);
+        let out = judge_cmd(&dir, &["--judge", "--json", "--judge-model", "opus"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(json["judgment"]["agent"], "claude-code");
+        assert_eq!(json["judgment"]["risk"], "high");
+        assert_eq!(json["judgment"]["model"], "opus");
+        assert!(
+            stderr(&out).contains(
+                "vernier: asking Claude Code (your subscription) to judge 1 link; it reads this repository's code, read-only"
+            ),
+            "{}",
+            stderr(&out)
+        );
+        let args = std::fs::read_to_string(dir.join("claude.args")).unwrap();
+        assert!(args.contains("dontAsk"), "{args}");
+        assert!(args.contains("--model opus"), "{args}");
+        let stdin = std::fs::read_to_string(dir.join("claude.stdin")).unwrap();
+        assert!(stdin.contains("web -> cart"), "{stdin}");
+        let env = std::fs::read_to_string(dir.join("claude.env")).unwrap();
+        assert_eq!(env.trim(), "key=unset cc=unset");
+    }
+
+    #[test]
+    fn judge_prints_the_judgment_after_the_report() {
+        let dir = tmp("report");
+        fake_agents(&dir, Some(VERDICT), None);
+        let out = judge_cmd(&dir, &["--judge"]).output().unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        let text = String::from_utf8_lossy(&out.stdout);
+        let judgment = text.find("JUDGMENT").expect(&text);
+        assert!(
+            text.find("BLAST RADIUS").is_some_and(|i| i < judgment),
+            "{text}"
+        );
+        assert!(text.contains("Web talks to cart."), "{text}");
+    }
+
+    #[test]
+    fn judge_codex_by_name() {
+        let dir = tmp("codex");
+        fake_agents(&dir, Some(VERDICT), Some(VERDICT));
+        let out = judge_cmd(&dir, &["--judge=codex", "--json"])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(json["judgment"]["agent"], "codex");
+        let env = std::fs::read_to_string(dir.join("codex.env")).unwrap();
+        assert_eq!(env.trim(), "key=unset");
+        assert!(!dir.join("claude.args").exists());
+        // Only the named agent's sign-in is checked.
+        assert!(dir.join("codex.login").exists());
+        assert!(!dir.join("claude.auth").exists());
+    }
+
+    #[test]
+    fn bare_judge_honours_vernier_agent() {
+        let dir = tmp("env-codex");
+        fake_agents(&dir, Some(VERDICT), Some(VERDICT));
+        let out = judge_cmd(&dir, &["--judge", "--json"])
+            .env("VERNIER_AGENT", "codex")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert_eq!(json["judgment"]["agent"], "codex");
+        assert!(!dir.join("claude.args").exists());
+        assert!(!dir.join("claude.auth").exists());
+    }
+
+    #[test]
+    fn a_failed_judge_still_prints_the_report_and_exits_1() {
+        let dir = tmp("judge-fails");
+        write_script(
+            &dir,
+            "claude",
+            r#"case "$1" in
+  auth) echo '{"loggedIn":true}'; exit 0;;
+esac
+echo "rate limited" >&2
+exit 2
+"#,
+        );
+        let out = judge_cmd(&dir, &["--judge"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(text.contains("BLAST RADIUS"), "{text}");
+        assert!(!text.contains("JUDGMENT"), "{text}");
+        let err = stderr(&out);
+        assert!(
+            err.contains("vernier: judge failed: Claude Code failed: rate limited"),
+            "{err}"
+        );
+
+        let html = dir.join("out.html");
+        let out = judge_cmd(
+            &dir,
+            &["--judge", "--json", "--html", html.to_str().unwrap()],
+        )
+        .output()
+        .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+        assert!(std::fs::read_to_string(&html).unwrap().contains("cart"));
+        let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+        assert!(json["blast"].is_object(), "{json}");
+        assert!(json.get("judgment").is_none(), "{json}");
+        assert!(stderr(&out).contains("vernier: judge failed:"));
+    }
+
+    #[test]
+    fn judge_without_agents_fails_fast() {
+        let dir = tmp("none");
+        let out = judge_cmd(&dir, &["--judge"]).output().unwrap();
+        assert_eq!(out.status.code(), Some(1));
+        let err = stderr(&out);
+        assert!(
+            err.starts_with("vernier: no coding agent is ready"),
+            "{err}"
+        );
+        assert!(err.contains("claude auth login"), "{err}");
+        assert!(err.contains("--explain"), "{err}");
+        assert!(out.stdout.is_empty());
+    }
+
+    #[test]
+    fn judge_with_nothing_uncertain_skips_the_agent() {
+        let dir = tmp("static");
+        fake_agents(&dir, Some(VERDICT), None);
+        let out = bin()
+            .arg(fixture("compose-app"))
+            .args([
+                "--files",
+                "services/orders/main.go",
+                "--no-color",
+                "--judge",
+            ])
+            .env("PATH", format!("{}:/usr/bin:/bin", dir.display()))
+            .env_remove("VERNIER_AGENT")
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        assert!(
+            stderr(&out).contains(
+                "vernier: nothing uncertain to judge: every link in this blast radius is observed or static"
+            ),
+            "{}",
+            stderr(&out)
+        );
+        assert!(!dir.join("claude.args").exists());
+    }
+
+    fn alive(pid: &str) -> bool {
+        Command::new("kill")
+            .args(["-0", pid])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    /// Ctrl-C goes to the terminal's foreground process group. The agent runs
+    /// in a group of its own, so vernier must take it down on the way out.
+    #[test]
+    fn ctrl_c_during_judge_stops_the_agent_and_removes_its_temp_dir() {
+        use std::os::unix::process::CommandExt;
+        use std::time::{Duration, Instant};
+        let dir = tmp("ctrl-c");
+        fake_agents(&dir, None, None);
+        write_script(
+            &dir,
+            "codex",
+            &format!(
+                r#"d="{d}"
+case "$1" in
+  login) echo "Logged in using ChatGPT"; exit 0;;
+  exec)
+    prev=""
+    for a in "$@"; do if [ "$prev" = "-o" ]; then dirname "$a" > "$d/codex.tmp"; fi; prev="$a"; done
+    sleep 30 & echo $! > "$d/codex.pid"; wait;;
+esac
+exit 0
+"#,
+                d = dir.display()
+            ),
+        );
+        let mut vernier = judge_cmd(&dir, &["--judge=codex"])
+            .process_group(0)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid_file = dir.join("codex.pid");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !std::fs::read_to_string(&pid_file).is_ok_and(|p| !p.trim().is_empty()) {
+            assert!(Instant::now() < deadline, "the fake agent never started");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        // Let the watchdog install its trap.
+        std::thread::sleep(Duration::from_millis(300));
+        let grandchild = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .to_string();
+        let temp = std::path::PathBuf::from(
+            std::fs::read_to_string(dir.join("codex.tmp"))
+                .unwrap()
+                .trim(),
+        );
+        Command::new("kill")
+            .args(["-INT", &format!("-{}", vernier.id())])
+            .status()
+            .unwrap();
+        let _ = vernier.wait();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while (alive(&grandchild) || temp.exists()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let (survived, left) = (alive(&grandchild), temp.exists());
+        if survived {
+            let _ = Command::new("kill").args(["-KILL", &grandchild]).status();
+        }
+        assert!(!survived, "the agent outlived Ctrl-C");
+        assert!(!left, "{} outlived Ctrl-C", temp.display());
+    }
+
+    #[test]
+    fn judge_conflicts_with_explain() {
+        let out = bin()
+            .args(["--judge", "--explain"])
+            .env_remove("VERNIER_AGENT")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+    }
+
+    #[test]
+    fn judge_model_needs_judge() {
+        let out = bin()
+            .args(["--judge-model", "opus"])
+            .env_remove("VERNIER_AGENT")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(2));
+    }
+
+    #[test]
+    fn html_carries_the_judgment_and_its_panel() {
+        let dir = tmp("judge-html");
+        fake_agents(&dir, Some(VERDICT), None);
+        let file = dir.join("out.html");
+        let out = judge_cmd(&dir, &["--judge", "--html", file.to_str().unwrap()])
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "{}", stderr(&out));
+        let html = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            html.contains("Web talks to cart."),
+            "judgment JSON embedded"
+        );
+        assert!(html.contains("judgment"), "panel id");
+        assert!(html.contains("box.id = 'judgment'"));
+    }
+}
+
+#[test]
+fn mcp_answers_initialize_and_tools_list_one_line_each() {
+    use std::io::Write;
+    use std::process::Stdio;
+    let mut child = bin()
+        .args(["mcp", fixture("compose-app").to_str().unwrap()])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(
+            concat!(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n",
+                "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
+                "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}\n",
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    // Stdin is dropped above, so the server reads EOF and exits 0.
+    let out = child.wait_with_output().unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let lines: Vec<serde_json::Value> = String::from_utf8(out.stdout)
+        .unwrap()
+        .lines()
+        .map(|l| serde_json::from_str(l).unwrap())
+        .collect();
+    assert_eq!(lines.len(), 2);
+    assert_eq!(lines[0]["result"]["serverInfo"]["name"], "vernier");
+    assert_eq!(lines[1]["result"]["tools"].as_array().unwrap().len(), 3);
+}
+
+#[test]
+fn mcp_fails_with_the_usual_error_on_a_missing_path() {
+    let out = bin()
+        .args(["mcp", "/definitely/not/here"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&out.stderr).starts_with("vernier:"));
+    assert!(out.stdout.is_empty());
+}
+
+#[test]
+fn agent_needs_a_terminal() {
+    let out = bin()
+        .arg("agent")
+        .env_remove("VERNIER_AGENT")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("agent needs a terminal"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn dash_leading_prompt_and_model_are_refused() {
+    for (args, message) in [
+        (
+            vec!["agent", "--prompt=-x"],
+            "--prompt must not start with -",
+        ),
+        (vec!["agent", "--model=-x"], "--model must not start with -"),
+        (
+            vec!["--judge", "--judge-model=-x"],
+            "--judge-model must not start with -",
+        ),
+    ] {
+        let out = bin()
+            .args(&args)
+            .env_remove("VERNIER_AGENT")
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(err.contains(message), "{args:?}: {err}");
+    }
 }

@@ -592,3 +592,60 @@ fn html_report_is_self_contained_and_embeds_the_contract() {
     let json: serde_json::Value = serde_json::from_str(&inner[json_start..]).unwrap();
     assert_eq!(json["analysis"]["blast"]["summary"]["reached"], 4);
 }
+
+#[test]
+fn your_changes_are_the_branch_since_main_plus_uncommitted_and_untracked_files() {
+    let repo = http_repo("git-working");
+    let root = &repo.root;
+    assert_eq!(git::working_change(root).unwrap(), None, "clean main");
+
+    common::git(root, &["checkout", "-q", "pr-9"]);
+    let branch = git::working_change(root).unwrap().unwrap();
+    assert_eq!(branch.kind, ChangeKind::Working);
+    assert_eq!(branch.reference, "pr-9");
+    assert_eq!(branch.files, vec!["cart/server.js"]);
+    let how = branch.how.as_deref().unwrap();
+    assert!(how.starts_with("since main at "), "{how}");
+    assert!(!how.contains("uncommitted"), "{how}");
+
+    common::append(root, "payment/payment.py", "# wip\n");
+    common::write(root, "web/extra.conf", "# new\n");
+    let dirty = git::working_change(root).unwrap().unwrap();
+    assert_eq!(
+        dirty.files,
+        vec!["cart/server.js", "payment/payment.py", "web/extra.conf"]
+    );
+    assert!(
+        dirty
+            .how
+            .as_deref()
+            .unwrap()
+            .ends_with(", with uncommitted edits"),
+        "{:?}",
+        dirty.how
+    );
+
+    common::git(root, &["stash", "-q", "-u"]);
+    common::git(root, &["checkout", "-q", "main"]);
+    common::git(root, &["stash", "pop", "-q"]);
+    let on_main = git::working_change(root).unwrap().unwrap();
+    assert_eq!(on_main.reference, "main");
+    assert_eq!(on_main.how.as_deref(), Some("uncommitted edits"));
+    assert_eq!(on_main.files, vec!["payment/payment.py", "web/extra.conf"]);
+}
+
+#[test]
+fn your_changes_are_relative_to_the_analysed_directory() {
+    let repo = nested_repo("git-working-nested");
+    let app = repo.root.join("nested/app");
+    common::append(&app, "checkout/producer.js", "// wip\n");
+    common::write(&repo.root, "README.md", "# changed\n");
+    let change = git::working_change(&app).unwrap().unwrap();
+    assert_eq!(change.files, vec!["checkout/producer.js"]);
+    assert_eq!(change.outside_root, 1);
+
+    let elsewhere = std::env::temp_dir().join(format!("vernier-no-git-{}", std::process::id()));
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    assert_eq!(git::working_change(&elsewhere).unwrap(), None);
+    std::fs::remove_dir_all(&elsewhere).unwrap();
+}

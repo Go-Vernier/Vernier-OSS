@@ -31,6 +31,9 @@ pub enum ChangeKind {
     Commit,
     Diff,
     Files,
+    /// Your changes: the branch since it left the default branch, plus
+    /// uncommitted and untracked files.
+    Working,
 }
 
 /// The change under analysis: its files and where they were read from.
@@ -38,7 +41,7 @@ pub enum ChangeKind {
 #[serde(rename_all = "camelCase")]
 pub struct Change {
     pub kind: ChangeKind,
-    /// `#481`, the diff range, or `3 files`.
+    /// `#481`, the diff range, `3 files`, or the branch name.
     pub reference: String,
     /// Which rule found a pull request: `merge commit 7d13248`, `ref refs/pull/481/head at ab12cd3`.
     #[serde(default, skip_serializing_if = "Option::is_none")]

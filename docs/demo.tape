@@ -17,7 +17,7 @@ Type "export PS1='$ ' && clear"
 Enter
 Show
 
-Type "vernier analyze robot-shop --files cart/server.js"
+Type "vernier robot-shop --files cart/server.js"
 Sleep 500ms
 Enter
 Sleep 4s

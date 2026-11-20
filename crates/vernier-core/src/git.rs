@@ -20,6 +20,10 @@ pub enum GitError {
     NotARepository(String),
     #[error("git {command}: {message}")]
     Command { command: String, message: String },
+    #[error("diff range must be revisions such as main...HEAD, not options: {0}")]
+    InvalidRange(String),
+    #[error("diff range is empty; name revisions such as main...HEAD")]
+    EmptyRange,
     #[error(
         "pull request #{number} is not in the local history of {root}: no first-parent commit on HEAD carries it ({searched} searched) and no ref holds it. Fetch it with `git fetch origin pull/{number}/head:refs/pull/{number}/head` and run again, or pass --diff <range> or --files <paths>"
     )]
@@ -178,10 +182,21 @@ pub fn files_in_commit(root: &Path, commit: &Commit) -> Result<Vec<String>, GitE
     Ok(lines(&text))
 }
 
-/// `git diff --name-only <range>`, verbatim.
+/// `git diff --name-only <range>`. The range is untrusted (a flag, or an
+/// agent steered by repository content), so a token that git would read as an
+/// option, such as `--output=<path>`, is refused, and `--` after the
+/// revisions keeps every token from being read as a path.
 pub fn files_in_range(root: &Path, range: &str) -> Result<Vec<String>, GitError> {
+    let tokens: Vec<&str> = range.split_whitespace().collect();
+    if let Some(option) = tokens.iter().find(|t| t.starts_with('-')) {
+        return Err(GitError::InvalidRange((*option).to_string()));
+    }
+    if tokens.is_empty() {
+        return Err(GitError::EmptyRange);
+    }
     let mut args = vec!["diff", "--name-only"];
-    args.extend(range.split_whitespace());
+    args.extend(tokens);
+    args.push("--");
     Ok(lines(&run(root, &args)?))
 }
 
@@ -198,6 +213,90 @@ pub fn diff(root: &Path, range: &str) -> Result<Change, GitError> {
         files,
         outside_root,
     })
+}
+
+/// The branch a feature branch is compared with: origin's default branch,
+/// else a local or remote `main` or `master`.
+pub fn default_branch(root: &Path) -> Option<String> {
+    if let Ok(name) = run(
+        root,
+        &[
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "refs/remotes/origin/HEAD",
+        ],
+    ) {
+        let name = name.trim();
+        if !name.is_empty() {
+            return Some(name.to_string());
+        }
+    }
+    ["main", "master", "origin/main", "origin/master"]
+        .into_iter()
+        .find(|name| run(root, &["rev-parse", "--verify", "--quiet", name]).is_ok())
+        .map(str::to_string)
+}
+
+/// Your changes, with nothing to name: what this branch changed since it
+/// left the default branch, plus uncommitted edits and untracked files.
+/// None outside a repository, before the first commit, and when nothing in
+/// the analysed directory changed.
+pub fn working_change(root: &Path) -> Result<Option<Change>, GitError> {
+    if !is_repository(root) || run(root, &["rev-parse", "--verify", "--quiet", "HEAD"]).is_err() {
+        return Ok(None);
+    }
+    let prefix = prefix(root)?;
+    let branch = run(root, &["rev-parse", "--abbrev-ref", "HEAD"])?
+        .trim()
+        .to_string();
+    let head = run(root, &["rev-parse", "HEAD"])?.trim().to_string();
+    let base = default_branch(root).and_then(|name| {
+        let base = run(root, &["merge-base", "HEAD", &name]).ok()?;
+        Some((name, base.trim().to_string()))
+    });
+    let mut files = Vec::new();
+    let mut committed = false;
+    if let Some((_, base)) = base.as_ref().filter(|(_, base)| *base != head) {
+        files = lines(&run(root, &["diff", "--name-only", base, "HEAD"])?);
+        committed = !files.is_empty();
+    }
+    let mut uncommitted = lines(&run(root, &["diff", "--name-only", "HEAD"])?);
+    uncommitted.extend(lines(&run(
+        root,
+        &["ls-files", "--others", "--exclude-standard", "--full-name"],
+    )?));
+    let dirty = !uncommitted.is_empty();
+    for file in uncommitted {
+        if !files.contains(&file) {
+            files.push(file);
+        }
+    }
+    files.sort();
+    let (files, outside_root) = relative(&prefix, files);
+    if files.is_empty() {
+        return Ok(None);
+    }
+    let how = match (&base, committed) {
+        (Some((name, base)), true) => {
+            let short = base.get(..7).unwrap_or(base);
+            let mut how = format!("since {name} at {short}");
+            if dirty {
+                how.push_str(", with uncommitted edits");
+            }
+            how
+        }
+        _ => "uncommitted edits".to_string(),
+    };
+    Ok(Some(Change {
+        kind: ChangeKind::Working,
+        reference: branch,
+        how: Some(how),
+        title: None,
+        date: None,
+        files,
+        outside_root,
+    }))
 }
 
 /// The change one commit made.
@@ -309,6 +408,7 @@ pub fn recent(root: &Path, n: usize) -> Result<Recent, GitError> {
 mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use std::path::PathBuf;
 
     #[test]
     fn subjects_carry_pull_request_numbers_in_four_shapes() {
@@ -364,6 +464,81 @@ mod tests {
         let err = first_parent_log(&root, 5).unwrap_err();
         assert!(matches!(err, GitError::NotARepository(_)), "{err}");
         assert!(!is_repository(&root));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    fn temp_repo(name: &str) -> PathBuf {
+        let root = std::env::temp_dir().join(format!("vernier-git-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        for args in [
+            &["init", "-q"][..],
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "x",
+            ],
+        ] {
+            assert!(
+                Command::new("git")
+                    .arg("-C")
+                    .arg(&root)
+                    .args(args)
+                    .status()
+                    .unwrap()
+                    .success()
+            );
+        }
+        root
+    }
+
+    #[test]
+    fn a_range_with_an_option_is_refused_and_writes_nothing() {
+        let root = temp_repo("option");
+        let out = root.join("pwn.txt");
+        let range = format!("--output={} HEAD", out.display());
+        let err = files_in_range(&root, &range).unwrap_err();
+        assert!(
+            err.to_string().starts_with(
+                "diff range must be revisions such as main...HEAD, not options: --output="
+            ),
+            "{err}"
+        );
+        assert!(!out.exists());
+        assert!(matches!(
+            diff(&root, "-p HEAD"),
+            Err(GitError::InvalidRange(_))
+        ));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn an_empty_range_is_refused() {
+        let root = temp_repo("empty");
+        assert!(matches!(
+            files_in_range(&root, "  "),
+            Err(GitError::EmptyRange)
+        ));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn a_valid_range_still_lists_files() {
+        let root = temp_repo("valid");
+        assert_eq!(
+            files_in_range(&root, "HEAD HEAD").unwrap(),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            files_in_range(&root, "HEAD...HEAD").unwrap(),
+            Vec::<String>::new()
+        );
         std::fs::remove_dir_all(&root).unwrap();
     }
 }

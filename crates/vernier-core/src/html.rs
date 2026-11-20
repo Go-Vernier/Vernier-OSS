@@ -101,6 +101,14 @@ svg.busy .node text{font-size:10px}
 .node.quiet text{opacity:0}
 .node.quiet.near text{opacity:1}
 .node.faded.near{opacity:1}
+#judgment{border:1px solid var(--line);border-radius:6px;padding:10px 12px;margin:0 0 18px}
+#judgment h2{margin:0 0 8px}
+#judgment .by{color:var(--muted);font-size:12px;margin:0 0 6px}
+#judgment .verdict{padding:6px 0;border-top:1px solid var(--line);font-size:13px}
+#judgment .verdict .where{color:var(--muted);font-family:var(--mono);font-size:12px}
+#judgment ul{margin:6px 0 0;padding-left:18px;font-size:13px}
+.badge.confirmed{background:var(--observed)}.badge.doubtful{background:var(--changed)}.badge.unclear{background:var(--uncertain)}
+.badge.low{background:var(--observed)}.badge.medium{background:var(--inferred)}.badge.high{background:var(--changed)}
 </style>
 </head>
 <body>
@@ -414,7 +422,7 @@ svg.busy .node text{font-size:10px}
   }
   function showChange() {
     var c = B.change, h = '';
-    var kind = c.kind === 'pr' ? 'PR ' + c.reference : c.kind === 'diff' ? 'diff ' + c.reference : c.kind === 'commit' ? 'commit ' + c.reference : c.reference + ' given';
+    var kind = c.kind === 'pr' ? 'PR ' + c.reference : c.kind === 'diff' ? 'diff ' + c.reference : c.kind === 'commit' ? 'commit ' + c.reference : c.kind === 'working' ? 'your changes on ' + c.reference : c.reference + ' given';
     h += '<p class="name">' + esc(kind) + '</p>';
     h += '<dl class="kv">';
     if (c.how) h += '<dt>found as</dt><dd>' + esc(c.how) + '</dd>';
@@ -438,7 +446,42 @@ svg.busy .node text{font-size:10px}
     if (B.notReached.length) h += '<div class="list">' + esc(B.notReached.join(', ')) + '</div>';
     return h;
   }
+  // The agent's judgment, built with textContent only: its words come from a
+  // model, so none of them may reach innerHTML.
+  function jel(tag, cls, text, parent) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    if (parent) parent.appendChild(e);
+    return e;
+  }
+  function judgmentPanel() {
+    var J = A.judgment, box = jel('section', '', null);
+    box.id = 'judgment';
+    jel('h2', '', 'Judgment', box);
+    var head = jel('p', 'by', null, box);
+    jel('span', 'badge ' + J.risk, 'risk ' + J.risk, head);
+    head.appendChild(document.createTextNode(' by ' + (J.agent === 'codex' ? 'Codex' : 'Claude Code') + (J.model ? ' ' + J.model : '')));
+    jel('p', '', J.summary, box);
+    J.links.forEach(function (l) {
+      var row = jel('div', 'verdict', null, box), top = jel('div', '', null, row);
+      jel('strong', '', l.from + ' → ' + l.to + ' ', top);
+      jel('span', 'badge ' + l.verdict, l.verdict, top);
+      jel('div', '', l.why, row);
+      if (l.file) jel('div', 'where', l.file + (l.line ? ':' + l.line : ''), row);
+    });
+    if (J.check.length) {
+      jel('h2', '', 'Check', box);
+      var ul = jel('ul', '', null, box);
+      J.check.forEach(function (c) { jel('li', '', c, ul); });
+    }
+    return box;
+  }
   function showDefault() {
+    showDefaultBody();
+    if (A.judgment) panel.insertBefore(judgmentPanel(), panel.firstChild);
+  }
+  function showDefaultBody() {
     if (!nodes.length) { panel.innerHTML = '<p class="hint">No services were discovered in this repository, so there is nothing to draw.</p>'; return; }
     panel.innerHTML = (B ? showChange() : '<p class="hint">Click a node for its declaration, its edges and their evidence.</p>') + showFindings();
   }
