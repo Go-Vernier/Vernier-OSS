@@ -66,6 +66,14 @@ impl Agent {
         }
     }
 
+    /// The name the JSON carries and `--judge=` accepts.
+    pub fn slug(self) -> &'static str {
+        match self {
+            Self::ClaudeCode => "claude-code",
+            Self::Codex => "codex",
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Self::ClaudeCode => "Claude Code",

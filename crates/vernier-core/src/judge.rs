@@ -4,7 +4,8 @@
 //! the rest were found in the code or seen in production.
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::time::Duration;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -21,6 +22,7 @@ pub const JUDGE_TIMEOUT_SECONDS: u64 = 600;
 /// unjudged.
 pub const MAX_LINKS: usize = 20;
 
+static COUNTER: AtomicU64 = AtomicU64::new(0);
 const MAX_CHECK: usize = 6;
 const MAX_EVIDENCE: usize = 3;
 const SNIPPET_CHARS: usize = 300;
@@ -210,8 +212,19 @@ pub struct LinkVerdict {
     pub why: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "lenient_line"
+    )]
     pub line: Option<u32>,
+}
+
+/// One bad line (negative, huge, a string) is dropped rather than failing the
+/// whole judgment: the verdict is still worth showing.
+fn lenient_line<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<u32>, D::Error> {
+    let value = Value::deserialize(d)?;
+    Ok(value.as_u64().and_then(|n| u32::try_from(n).ok()))
 }
 
 /// The judgment as printed and as the JSON carries it.
@@ -306,11 +319,7 @@ pub fn parse(agent: Agent, raw: &Value, asked: &[Link]) -> Result<Judgment, Agen
         .map(str::to_string)
         .collect();
     Ok(Judgment {
-        agent: match agent {
-            Agent::ClaudeCode => "claude-code",
-            Agent::Codex => "codex",
-        }
-        .into(),
+        agent: agent.slug().into(),
         model: None,
         risk: parsed.risk,
         summary: parsed.summary.trim().to_string(),
@@ -396,8 +405,17 @@ pub fn judge(
     };
     let binary = agent::which(agent.binary())
         .ok_or_else(|| AgentError::NotReady(agent.install_hint().to_string()))?;
-    let tmp = std::env::temp_dir().join(format!("vernier-judge-{}", std::process::id()));
-    std::fs::create_dir_all(&tmp)
+    // Unique and freshly created: a path that already exists is an error, so
+    // another process (or a planted directory) is never reused.
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let tmp = std::env::temp_dir().join(format!(
+        "vernier-judge-{}-{nanos}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&tmp)
         .map_err(|e| AgentError::Failed(format!("vernier: can't create {}: {e}", tmp.display())))?;
     let result = run_judge(agent, model, analysis, blast, links, &binary, &tmp);
     let _ = std::fs::remove_dir_all(&tmp);
@@ -788,6 +806,22 @@ mod tests {
         );
         assert_eq!(j.links[1].verdict, Verdict::Unclear);
         assert_eq!(j.links[1].why, "not judged");
+    }
+
+    #[test]
+    fn a_bad_line_becomes_none_without_failing_the_judgment() {
+        let row = |t: &str, line: Value| json!({"from": "a", "to": t, "verdict": "confirmed", "why": "w", "file": "f.js", "line": line});
+        let raw = json!({
+            "risk": "low", "summary": "s", "check": [],
+            "links": [row("b", json!(12)), row("c", json!(-3)), row("d", json!(99_999_999_999_u64)), row("e", json!("7")), row("f", json!(1.5))],
+        });
+        let asked: Vec<Link> = ["b", "c", "d", "e", "f"]
+            .iter()
+            .map(|t| link("a", t))
+            .collect();
+        let j = parse(Agent::ClaudeCode, &raw, &asked).unwrap();
+        let lines: Vec<Option<u32>> = j.links.iter().map(|l| l.line).collect();
+        assert_eq!(lines, vec![Some(12), None, None, None, None]);
     }
 
     #[test]

@@ -258,7 +258,7 @@ fn wrap_into(out: &mut Vec<String>, text: &str, first: &str, rest: &str) {
 /// of, with the agent that judged them and the checks it asks for.
 pub fn format_judgment(j: &crate::judge::Judgment, color: bool) -> String {
     let c = Paint { color };
-    let label = if j.agent == "codex" {
+    let label = if j.agent == crate::agent::Agent::Codex.slug() {
         "Codex"
     } else {
         "Claude Code"
