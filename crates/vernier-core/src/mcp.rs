@@ -11,12 +11,13 @@ use serde_json::{Map, Value, json};
 use crate::analyze::Analysis;
 use crate::blast::{self, Change};
 use crate::git;
+use crate::report::hop_words;
 
 /// The one protocol version spoken, whatever the client asks for.
 const PROTOCOL_VERSION: &str = "2025-06-18";
 const MAX_DEPTH: u64 = 10;
 
-const INSTRUCTIONS: &str = "Vernier maps the services in this repository and which of them a change can reach. Call blast_radius to see what a change affects, services to list the services, and edges to see how one service connects to others, with evidence.";
+const INSTRUCTIONS: &str = "Vernier maps the services in this repository and which of them a change can reach. Call blast_radius to see what a change affects, services to list the services, and edges to see how one service connects to others, with evidence. In path hops, {from, to, relation} reads as: to <relation> from; reached_in_words states each path in plain words.";
 
 /// A loaded analysis answering requests. Loaded once so every call is fast.
 pub struct Server {
@@ -141,7 +142,23 @@ impl Server {
                 .ok_or("no changes on this branch; pass files, pr or diff")?
         };
         let blast = blast::of_change(&self.analysis.graph, change, depth);
-        serde_json::to_value(&blast).map_err(|e| e.to_string())
+        let reached_in_words: Vec<Value> = blast
+            .reached
+            .iter()
+            .map(|r| {
+                let why: Vec<String> = r.path.iter().map(hop_words).collect();
+                json!({
+                    "service": r.service,
+                    "depth": r.depth,
+                    "confidence": r.confidence,
+                    "why": why.join("; "),
+                })
+            })
+            .collect();
+        let mut value = serde_json::to_value(&blast).map_err(|e| e.to_string())?;
+        // The raw hops are easy to read backwards, so state each path too.
+        value["reached_in_words"] = Value::Array(reached_in_words);
+        Ok(value)
     }
 
     fn services(&self, args: &Map<String, Value>) -> Result<Value, String> {
@@ -206,7 +223,7 @@ fn tool_list() -> Value {
     json!([
         {
             "name": "blast_radius",
-            "description": "The services a change can reach, walking the dependency graph from the services that own the changed files. Pass one of files, pr or diff; with none, the working change on this branch is used.",
+            "description": "The services a change can reach, walking the dependency graph from the services that own the changed files. Pass one of files, pr or diff; with none, the working change on this branch is used. In path hops, {from, to, relation} reads as: to <relation> from; reached_in_words states each path in plain words.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -478,5 +495,49 @@ mod tests {
         assert_eq!(r["isError"], true);
         assert!(text(&r).contains("not options"), "{}", text(&r));
         assert!(!out.exists());
+    }
+
+    #[test]
+    fn blast_radius_states_each_path_in_plain_words() {
+        let mut s = server("edges-http-app");
+        let result = call(&mut s, "blast_radius", &json!({"files":["cart/server.js"]}));
+        let blast: Value = serde_json::from_str(text(&result)).unwrap();
+        let words = blast["reached_in_words"].as_array().unwrap();
+        assert_eq!(words.len(), blast["reached"].as_array().unwrap().len());
+        let why = |name: &str| {
+            words
+                .iter()
+                .find(|w| w["service"] == name)
+                .unwrap_or_else(|| panic!("{name} not reached"))["why"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        };
+        assert!(
+            why("payment").contains("payment calls cart"),
+            "{}",
+            why("payment")
+        );
+        assert!(why("web").contains("web calls cart"), "{}", why("web"));
+        assert!(words[0]["depth"].is_number() && words[0]["confidence"].is_string());
+    }
+
+    #[test]
+    fn tool_list_explains_hop_direction() {
+        let mut s = server("compose-app");
+        let reply = s
+            .handle(&json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}))
+            .unwrap();
+        let d = reply["result"]["tools"][0]["description"].as_str().unwrap();
+        assert!(d.contains("to <relation> from"));
+        let init = s
+            .handle(&json!({"jsonrpc":"2.0","id":2,"method":"initialize"}))
+            .unwrap();
+        assert!(
+            init["result"]["instructions"]
+                .as_str()
+                .unwrap()
+                .contains("to <relation> from")
+        );
     }
 }
