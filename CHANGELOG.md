@@ -4,7 +4,7 @@ Every release of Vernier, newest first. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.2.0] - 2026-11-20
 
 ### Added
 
@@ -74,4 +74,5 @@ README.
 - **Prebuilt binaries** for macOS (Apple silicon, Intel), Linux (x64, arm64;
   static, any distribution) and Windows (x64).
 
+[0.2.0]: https://github.com/Go-Vernier/Vernier-OSS/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Go-Vernier/Vernier-OSS/releases/tag/v0.1.0
