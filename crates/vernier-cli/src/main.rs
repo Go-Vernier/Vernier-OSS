@@ -183,10 +183,11 @@ fn run() -> anyhow::Result<()> {
             if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
                 anyhow::bail!("agent needs a terminal; for a one-shot verdict use vernier --judge");
             }
+            let env_choice = std::env::var("VERNIER_AGENT").ok();
             let agent = agent::choose(
                 with.as_deref(),
-                std::env::var("VERNIER_AGENT").ok().as_deref(),
-                &agent::detect(),
+                env_choice.as_deref(),
+                &agent::detect_for(with.as_deref(), env_choice.as_deref()),
             )?;
             let root = path
                 .canonicalize()
@@ -264,12 +265,15 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
     };
     agent::refuse_dash("--judge-model", judge_args.judge_model.as_deref())?;
     // Likewise a missing or signed-out agent.
-    let agent = match &judge_args.judge {
-        Some(named) => Some(agent::choose(
-            Some(named.as_str()),
-            std::env::var("VERNIER_AGENT").ok().as_deref(),
-            &agent::detect(),
-        )?),
+    let agent = match judge_args.judge.as_deref() {
+        Some(named) => {
+            let env_choice = std::env::var("VERNIER_AGENT").ok();
+            Some(agent::choose(
+                Some(named),
+                env_choice.as_deref(),
+                &agent::detect_for(Some(named), env_choice.as_deref()),
+            )?)
+        }
         None => None,
     };
     let mut analysis = load(&path, runtime, include_tests)?;

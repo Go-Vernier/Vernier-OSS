@@ -677,7 +677,7 @@ mod judge {
                 &format!(
                     r#"d="{d}"
 case "$1" in
-  auth) echo '{{"loggedIn":true,"authMethod":"claude.ai"}}'; exit 0;;
+  auth) touch "$d/claude.auth"; echo '{{"loggedIn":true,"authMethod":"claude.ai"}}'; exit 0;;
 esac
 for a in "$@"; do if [ "$a" = "-p" ]; then
   echo "$@" > "$d/claude.args"
@@ -701,7 +701,7 @@ exit 0
                 &format!(
                     r#"d="{d}"
 case "$1" in
-  login) echo "Logged in using ChatGPT"; exit 0;;
+  login) touch "$d/codex.login"; echo "Logged in using ChatGPT"; exit 0;;
   exec)
     echo "$@" > "$d/codex.args"
     cat > "$d/codex.stdin"
@@ -801,6 +801,9 @@ exit 0
         let env = std::fs::read_to_string(dir.join("codex.env")).unwrap();
         assert_eq!(env.trim(), "key=unset");
         assert!(!dir.join("claude.args").exists());
+        // Only the named agent's sign-in is checked.
+        assert!(dir.join("codex.login").exists());
+        assert!(!dir.join("claude.auth").exists());
     }
 
     #[test]
@@ -815,6 +818,7 @@ exit 0
         let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
         assert_eq!(json["judgment"]["agent"], "codex");
         assert!(!dir.join("claude.args").exists());
+        assert!(!dir.join("claude.auth").exists());
     }
 
     #[test]

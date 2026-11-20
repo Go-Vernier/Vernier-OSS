@@ -172,7 +172,24 @@ fn strip_verbatim_drive(path: &str) -> &str {
 /// Ask each agent whether it is installed and signed in. A status command
 /// that fails or times out counts as signed out.
 pub fn detect() -> Vec<Status> {
-    ALL.iter()
+    detect_only(&ALL)
+}
+
+/// The statuses [`choose`] needs for this name: when one is given (flag or
+/// `VERNIER_AGENT`), only that agent is asked, since each check can take
+/// seconds and the other agent can't be chosen anyway. An unknown name needs
+/// none.
+pub fn detect_for(named: Option<&str>, env_choice: Option<&str>) -> Vec<Status> {
+    match wanted(named, env_choice) {
+        Some(name) => detect_only(Agent::parse(name).as_slice()),
+        None => detect(),
+    }
+}
+
+/// [`detect`] for just these agents.
+pub fn detect_only(agents: &[Agent]) -> Vec<Status> {
+    agents
+        .iter()
         .map(|&agent| {
             let Some(exe) = which(agent.binary()) else {
                 return Status {
@@ -717,6 +734,12 @@ mod tests {
             panic!("unknown agent");
         };
         assert!(message.contains("claude, codex"), "{message}");
+    }
+
+    #[test]
+    fn an_unknown_name_checks_no_agent() {
+        assert_eq!(detect_for(Some("gemini"), None), vec![]);
+        assert_eq!(detect_for(Some(" "), Some("gemini")), vec![]);
     }
 
     #[test]
