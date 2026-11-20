@@ -859,6 +859,79 @@ exit 0
         assert!(!dir.join("claude.args").exists());
     }
 
+    fn alive(pid: &str) -> bool {
+        Command::new("kill")
+            .args(["-0", pid])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    /// Ctrl-C goes to the terminal's foreground process group. The agent runs
+    /// in a group of its own, so vernier must take it down on the way out.
+    #[test]
+    fn ctrl_c_during_judge_stops_the_agent_and_removes_its_temp_dir() {
+        use std::os::unix::process::CommandExt;
+        use std::time::{Duration, Instant};
+        let dir = tmp("ctrl-c");
+        fake_agents(&dir, None, None);
+        write_script(
+            &dir,
+            "codex",
+            &format!(
+                r#"d="{d}"
+case "$1" in
+  login) echo "Logged in using ChatGPT"; exit 0;;
+  exec)
+    prev=""
+    for a in "$@"; do if [ "$prev" = "-o" ]; then dirname "$a" > "$d/codex.tmp"; fi; prev="$a"; done
+    sleep 30 & echo $! > "$d/codex.pid"; wait;;
+esac
+exit 0
+"#,
+                d = dir.display()
+            ),
+        );
+        let mut vernier = judge_cmd(&dir, &["--judge=codex"])
+            .process_group(0)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let pid_file = dir.join("codex.pid");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !std::fs::read_to_string(&pid_file).is_ok_and(|p| !p.trim().is_empty()) {
+            assert!(Instant::now() < deadline, "the fake agent never started");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        // Let the watchdog install its trap.
+        std::thread::sleep(Duration::from_millis(300));
+        let grandchild = std::fs::read_to_string(&pid_file)
+            .unwrap()
+            .trim()
+            .to_string();
+        let temp = std::path::PathBuf::from(
+            std::fs::read_to_string(dir.join("codex.tmp"))
+                .unwrap()
+                .trim(),
+        );
+        Command::new("kill")
+            .args(["-INT", &format!("-{}", vernier.id())])
+            .status()
+            .unwrap();
+        let _ = vernier.wait();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while (alive(&grandchild) || temp.exists()) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let (survived, left) = (alive(&grandchild), temp.exists());
+        if survived {
+            let _ = Command::new("kill").args(["-KILL", &grandchild]).status();
+        }
+        assert!(!survived, "the agent outlived Ctrl-C");
+        assert!(!left, "{} outlived Ctrl-C", temp.display());
+    }
+
     #[test]
     fn judge_conflicts_with_explain() {
         let out = bin()

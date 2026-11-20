@@ -433,11 +433,12 @@ fn run_judge(
     std::fs::write(tmp.join("schema.json"), schema().to_string()).map_err(write_err)?;
     let mut argv = judge_argv(agent, model, &analysis.root, tmp);
     argv[0] = binary.display().to_string();
-    let out = agent::run(
+    let out = agent::run_with_cleanup(
         &argv,
         &prompt(&analysis.repository, blast, links),
         &analysis.root,
         Duration::from_secs(JUDGE_TIMEOUT_SECONDS),
+        tmp,
     )?;
     let label = agent.label();
     if !out.status_ok {

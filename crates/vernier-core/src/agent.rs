@@ -254,6 +254,18 @@ pub fn run(
     run_in(argv, stdin, cwd, timeout, std::env::vars())
 }
 
+/// Like [`run`], and if vernier is interrupted or killed mid-run, `cleanup`
+/// is removed along with the agent.
+pub fn run_with_cleanup(
+    argv: &[String],
+    stdin: &str,
+    cwd: &Path,
+    timeout: Duration,
+    cleanup: &Path,
+) -> Result<RunOutput, AgentError> {
+    run_watched(argv, stdin, cwd, timeout, std::env::vars(), Some(cleanup))
+}
+
 /// Like [`run`] with the parent environment passed in, so tests need not
 /// touch the real one.
 pub fn run_in(
@@ -262,6 +274,17 @@ pub fn run_in(
     cwd: &Path,
     timeout: Duration,
     parent_env: impl IntoIterator<Item = (String, String)>,
+) -> Result<RunOutput, AgentError> {
+    run_watched(argv, stdin, cwd, timeout, parent_env, None)
+}
+
+fn run_watched(
+    argv: &[String],
+    stdin: &str,
+    cwd: &Path,
+    timeout: Duration,
+    parent_env: impl IntoIterator<Item = (String, String)>,
+    cleanup: Option<&Path>,
 ) -> Result<RunOutput, AgentError> {
     let (program, rest) = argv
         .split_first()
@@ -281,6 +304,7 @@ pub fn run_in(
     let mut child = command
         .spawn()
         .map_err(|e| AgentError::Failed(format!("could not start {program}: {e}")))?;
+    let _watchdog = Watchdog(spawn_watchdog(std::process::id(), child.id(), cleanup));
 
     // Feed stdin from its own thread: a child that never reads it must not
     // block us. A closed pipe just means it did not want the input.
@@ -357,6 +381,63 @@ fn kill_tree(child: &mut Child) {
         .is_ok_and(|s| s.success());
     if !killed {
         let _ = child.kill();
+    }
+}
+
+/// `process_group(0)` lets a timeout kill the agent's whole tree, but it
+/// also takes the agent out of the terminal's foreground group, so Ctrl-C
+/// reaches only vernier. This shell stays in vernier's group: on INT, TERM
+/// or HUP, or once vernier's pid is gone, it kills the agent's group,
+/// removes the temp dir if one was given, and exits. Its arguments are
+/// `vernier_pid agent_pgid [dir]`, passed positionally and never spliced
+/// into the script.
+#[cfg(unix)]
+const WATCHDOG: &str = r#"v=$1 g=$2 d=$3
+end() {
+  kill -s KILL -- "-$g" 2>/dev/null
+  if [ -n "$d" ]; then rm -rf -- "$d"; fi
+  exit 0
+}
+trap end INT TERM HUP
+while kill -0 "$v" 2>/dev/null; do sleep 1 & wait $!; done
+end"#;
+
+/// Best effort: if the watchdog can't start, the run goes on without it.
+#[cfg(unix)]
+fn spawn_watchdog(vernier: u32, group: u32, cleanup: Option<&Path>) -> Option<Child> {
+    let mut command = Command::new("/bin/sh");
+    command
+        .args(["-c", WATCHDOG, "sh"])
+        .arg(vernier.to_string())
+        .arg(group.to_string());
+    if let Some(dir) = cleanup {
+        command.arg(dir);
+    }
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()
+}
+
+/// No watchdog on Windows: there is no process group to leave, and console
+/// processes share the Ctrl-C event, so the agent gets Ctrl-C directly.
+#[cfg(not(unix))]
+fn spawn_watchdog(_vernier: u32, _group: u32, _cleanup: Option<&Path>) -> Option<Child> {
+    None
+}
+
+/// Stops the watchdog when a run ends, however it ends. SIGKILL can't be
+/// trapped, so the watchdog never removes a temp dir the caller still reads.
+struct Watchdog(Option<Child>);
+
+impl Drop for Watchdog {
+    fn drop(&mut self) {
+        if let Some(child) = &mut self.0 {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
     }
 }
 
@@ -820,5 +901,89 @@ mod tests {
         let out = run_in(&argv, "hi", Path::new("."), Duration::from_secs(10), parent).unwrap();
         assert!(out.status_ok);
         assert_eq!(out.stdout, "hi[none]\n");
+    }
+
+    /// A fake agent: a shell in its own group with a backgrounded sleep,
+    /// whose pid it writes to `pidfile`. Returns the shell and the sleep's pid.
+    #[cfg(unix)]
+    fn fake_agent_group(pidfile: &Path) -> (Child, String) {
+        let mut command = Command::new("sh");
+        command
+            .args(["-c", r#"sleep 30 & echo $! > "$1"; wait"#, "sh"])
+            .arg(pidfile);
+        std::os::unix::process::CommandExt::process_group(&mut command, 0);
+        let mut agent = command.spawn().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while Instant::now() < deadline {
+            let pid = std::fs::read_to_string(pidfile).unwrap_or_default();
+            if !pid.trim().is_empty() {
+                return (agent, pid.trim().to_string());
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        kill_tree(&mut agent);
+        let _ = agent.wait();
+        panic!("fake agent never started");
+    }
+
+    /// Waits up to three seconds for `pid` to die and `dir` to be removed.
+    #[cfg(unix)]
+    fn gone_within_3s(pid: &str, dir: &Path) -> (bool, bool) {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while (process_alive(pid) || dir.exists()) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        (!process_alive(pid), !dir.exists())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watchdog_kills_the_agent_when_vernier_dies() {
+        let dir = test_dir("watchdog-exit");
+        let scratch = dir.join("scratch");
+        std::fs::create_dir_all(&scratch).unwrap();
+        let (mut agent, grandchild) = fake_agent_group(&dir.join("pid"));
+        let mut vernier = Command::new("sleep").arg("30").spawn().unwrap();
+        let dog = spawn_watchdog(vernier.id(), agent.id(), Some(&scratch));
+        vernier.kill().unwrap();
+        vernier.wait().unwrap();
+        let (dead, removed) = gone_within_3s(&grandchild, &scratch);
+        kill_tree(&mut agent);
+        let _ = agent.wait();
+        if let Some(mut dog) = dog {
+            let _ = dog.kill();
+            let _ = dog.wait();
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(dead, "agent grandchild {grandchild} outlived vernier");
+        assert!(removed, "temp dir outlived vernier");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn watchdog_kills_the_agent_on_ctrl_c() {
+        let dir = test_dir("watchdog-int");
+        let scratch = dir.join("scratch");
+        std::fs::create_dir_all(&scratch).unwrap();
+        let (mut agent, grandchild) = fake_agent_group(&dir.join("pid"));
+        let dog = spawn_watchdog(std::process::id(), agent.id(), Some(&scratch));
+        // Let the shell install its trap before the signal arrives.
+        thread::sleep(Duration::from_millis(300));
+        if let Some(dog) = &dog {
+            Command::new("kill")
+                .args(["-INT", &dog.id().to_string()])
+                .status()
+                .unwrap();
+        }
+        let (dead, removed) = gone_within_3s(&grandchild, &scratch);
+        kill_tree(&mut agent);
+        let _ = agent.wait();
+        if let Some(mut dog) = dog {
+            let _ = dog.kill();
+            let _ = dog.wait();
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(dead, "agent grandchild {grandchild} outlived Ctrl-C");
+        assert!(removed, "temp dir outlived Ctrl-C");
     }
 }
