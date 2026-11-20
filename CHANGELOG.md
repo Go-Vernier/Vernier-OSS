@@ -16,8 +16,25 @@ Every release of Vernier, newest first. The format follows
   LLM key. Anthropic, OpenAI, Gemini, Ollama and any OpenAI-compatible API,
   picked with `--llm`, `--model` or `VERNIER_LLM*` variables. Only the blast
   radius is sent; no source code.
+- **`--judge[=claude|codex]`** has your signed-in Claude Code or Codex read
+  the repository read-only and check each inferred or uncertain link (at
+  most 20) against the code. It prints a JUDGMENT section with an overall
+  risk, a summary, a verdict per link and CHECK items; it is `judgment` in
+  `--json` and a panel in `--html`. `--judge-model` and `VERNIER_AGENT`
+  choose the model and agent. No API key; it conflicts with `--explain`.
+- **`vernier agent`** opens Claude Code or Codex in the repository with
+  Vernier's tools (`blast_radius`, `services`, `edges`) attached for that
+  session only. `VERNIER_AGENT` also picks the agent here. Nothing is written
+  to your agent's configuration.
+- **`vernier mcp`** (hidden) serves those tools to coding agents over stdio.
+  `vernier agent` uses it.
 - **`--full`** prints every service, edge and finding, the old default.
 - **`--include-tests`** reads test, fixture and example directories.
+
+### Security
+
+- Diff ranges that start with `-` are refused, so `--diff` and the MCP tool
+  can't pass options to git.
 
 ### Changed
 

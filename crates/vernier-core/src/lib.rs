@@ -5,6 +5,7 @@
 //! from a change to report its blast radius.
 //! Every service and edge carries evidence and a confidence label. The JSON
 //! printed by [`Analysis::to_json`] is the contract other tools consume.
+pub mod agent;
 pub mod analyze;
 pub mod blast;
 pub mod config;
@@ -15,7 +16,9 @@ pub mod git;
 pub mod graph;
 pub mod history;
 pub mod html;
+pub mod judge;
 pub mod map;
+pub mod mcp;
 pub mod model;
 pub mod report;
 pub mod runtime;
@@ -31,10 +34,11 @@ pub use explain::{Explanation, LlmConfig, Provider};
 pub use git::GitError;
 pub use graph::{BlastGraph, GraphError};
 pub use history::History;
+pub use judge::Judgment;
 pub use map::MappingStats;
 pub use model::*;
 pub use report::{
-    format_change_report, format_explanation, format_repo_report, format_report,
+    format_change_report, format_explanation, format_judgment, format_repo_report, format_report,
     format_summary_report, hop_words, runtime_words,
 };
 pub use runtime::{RuntimeCall, RuntimeError, RuntimeGraph, RuntimeInput, RuntimeKind};

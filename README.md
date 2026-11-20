@@ -103,6 +103,8 @@ Or explore it in the terminal with `vernier tui`:
 | `vernier --diff main...HEAD` | Blast radius of a git diff range |
 | `vernier --files a.js b.py` | Blast radius of specific files |
 | `vernier --explain` | Add a plain-English summary written by your own LLM |
+| `vernier --judge=codex` | Have your Claude Code or Codex check the uncertain links against the code |
+| `vernier agent` | Open Claude Code or Codex here with Vernier's tools attached |
 | `vernier --full` | Every service, edge and finding in the repository |
 | `vernier --history 50` | Blast radius of each of the last 50 pull requests |
 | `vernier --otel traces.prom` | Add production traces from OpenTelemetry |
@@ -118,6 +120,68 @@ default is the current directory. `vernier analyze` is the same as `vernier`.
 In the TUI: `1`–`4` switch tabs, `j`/`k` move, `Enter` walks the blast radius
 of the selected service or pull request, `+`/`-` change the depth, `?` shows
 every key, and `q` quits.
+
+## Judge it with your coding agent
+
+Some links are inferred or uncertain. `--judge` has the Claude Code or Codex
+you already use read the repository, read-only, and check each of those links
+against the code. It checks at most 20. No API key is needed: it runs on your
+signed-in agent.
+
+```bash
+vernier --judge                    # uses the agent it finds
+vernier --judge=codex              # pick one: claude or codex
+vernier --judge --judge-model opus # pass a model name to the agent
+vernier agent                      # open the agent here and ask follow-ups
+vernier agent --with codex --prompt "What breaks if cart goes down?"
+```
+
+Write `--judge=codex` with an `=`. `--judge codex` with a space reads `codex`
+as the repository path. Without a value, `VERNIER_AGENT` picks the agent, and
+then the first of `claude` and `codex` that is installed and signed in.
+`--judge` and `--explain` can't be used together.
+
+The report gains a JUDGMENT section: an overall risk, a short summary, a
+verdict for each link (confirmed, doubtful or unclear, with `file:line`), and
+CHECK items. It is `judgment` in `--json` and a panel in `--html`. A run takes
+from about 30 seconds with Claude Code to a minute or more with Codex, and
+counts against your plan's limits. Vernier stops waiting after 10 minutes. If
+nothing is uncertain, no agent runs. From
+`vernier --files cart/server.js --judge=codex`, trimmed:
+
+```
+JUDGMENT  risk medium · by Codex
+
+  The web-to-cart route is configuration-dependent, not statically bound to
+  the cart service. The supplied Compose configuration does not set CART_HOST
+  for web, so runtime routing must be verified for deployments using this
+  change.
+
+  unclear    web -> cart  web/default.conf.template:2
+    Web proxies /api/cart/ to the runtime value of CART_HOST; the repository
+    does not bind that variable to cart in the web service configuration.
+
+CHECK
+  - Confirm CART_HOST resolves to the cart service in every deployed web
+    environment.
+  - Exercise /api/cart/ against the changed cart server and verify response
+    compatibility.
+
+  Judged by an agent that read the code.
+  It can be wrong; verify before relying on it.
+```
+
+`vernier agent [PATH]` opens Claude Code or Codex in the repository with
+Vernier's tools (`blast_radius`, `services`, `edges`) attached for that
+session only, so you can ask follow-up questions. `--with` picks the agent,
+`--model` the model and `--prompt` the first message. Nothing is written to
+your Claude Code or Codex configuration.
+
+**What it sends.** Unlike `--explain`, the judge and `vernier agent` let your
+own agent read the repository's source code, under your plan and your terms
+with that provider. Consumer plans are not meant for regulated or health
+data. For that, use `--explain` with an API key on an endpoint your
+agreements cover, or don't use the AI features.
 
 ## Explain it with your own LLM
 

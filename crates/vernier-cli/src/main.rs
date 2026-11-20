@@ -3,7 +3,7 @@ use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use vernier::{Change, RuntimeInput, blast, explain, git, history, html};
+use vernier::{Change, RuntimeInput, agent, blast, explain, git, history, html, judge};
 
 const EXAMPLES: &str = "\
 Examples:
@@ -11,7 +11,9 @@ Examples:
   vernier --pr 481                 what pull request #481 can reach
   vernier --files cart/server.js   what a change to these files can reach
   vernier --explain                add a plain-English summary from your own LLM key
+  vernier --judge                  have your Claude Code or Codex check the links against the code
   vernier --full                   every service, edge and finding
+  vernier agent                    ask your Claude Code or Codex follow-ups, with Vernier's tools
   vernier tui                      explore it interactively";
 
 #[derive(Parser)]
@@ -51,6 +53,31 @@ enum Cmd {
         #[arg(long = "include-tests")]
         include_tests: bool,
     },
+    /// Open Claude Code or Codex here with Vernier's tools attached
+    Agent {
+        /// Repository root
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Which agent: claude or codex [env: `VERNIER_AGENT`]
+        #[arg(long, value_name = "AGENT")]
+        with: Option<String>,
+        /// Model to ask the agent to use
+        #[arg(long, value_name = "NAME")]
+        model: Option<String>,
+        /// First message to send
+        #[arg(long, value_name = "TEXT")]
+        prompt: Option<String>,
+    },
+    /// Serve the blast radius to a coding agent over MCP on stdio
+    #[command(hide = true)]
+    Mcp {
+        /// Repository root
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Also read test, fixture and example directories
+        #[arg(long = "include-tests")]
+        include_tests: bool,
+    },
 }
 
 #[derive(Args)]
@@ -62,6 +89,8 @@ struct AnalyzeArgs {
     change: ChangeArgs,
     #[command(flatten)]
     explain: ExplainArgs,
+    #[command(flatten)]
+    judge: JudgeArgs,
     #[command(flatten)]
     runtime: RuntimeArgs,
     #[command(flatten)]
@@ -110,6 +139,27 @@ struct ExplainArgs {
     model: Option<String>,
 }
 
+/// `--judge` and the coding agent it asks. It is the user's own signed-in
+/// Claude Code or Codex, so no key is read.
+#[derive(Args)]
+#[command(next_help_heading = "Judge with Claude Code or Codex")]
+struct JudgeArgs {
+    /// Have your signed-in Claude Code or Codex read the code and judge the
+    /// uncertain links; `--judge=codex` picks one [env: `VERNIER_AGENT`]
+    #[arg(
+        long,
+        value_name = "AGENT",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "",
+        conflicts_with = "explain"
+    )]
+    judge: Option<String>,
+    /// Model name for the agent, instead of its default
+    #[arg(long = "judge-model", value_name = "NAME", requires = "judge")]
+    judge_model: Option<String>,
+}
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("vernier: {err}");
@@ -122,6 +172,41 @@ fn run() -> anyhow::Result<()> {
     match cli.command {
         None => analyze(cli.analyze),
         Some(Cmd::Analyze(args)) => analyze(args),
+        Some(Cmd::Agent {
+            path,
+            with,
+            model,
+            prompt,
+        }) => {
+            agent::refuse_dash("--model", model.as_deref())?;
+            agent::refuse_dash("--prompt", prompt.as_deref())?;
+            if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
+                anyhow::bail!("agent needs a terminal; for a one-shot verdict use vernier --judge");
+            }
+            let env_choice = std::env::var("VERNIER_AGENT").ok();
+            let agent = agent::choose(
+                with.as_deref(),
+                env_choice.as_deref(),
+                &agent::detect_for(with.as_deref(), env_choice.as_deref()),
+            )?;
+            let root = path
+                .canonicalize()
+                .map_err(|e| anyhow::anyhow!("can't read {}: {e}", path.display()))?;
+            anyhow::ensure!(root.is_dir(), "{} is not a directory", root.display());
+            let code = agent::handoff(agent, &root, model.as_deref(), prompt.as_deref())?;
+            std::process::exit(code);
+        }
+        Some(Cmd::Mcp {
+            path,
+            include_tests,
+        }) => {
+            let analysis = vernier::analyze_with(&path, vernier::Options { include_tests })?;
+            // Stdout is the protocol; the progress line goes to stderr.
+            eprintln!("vernier: serving {} over MCP", analysis.root.display());
+            vernier::mcp::Server::new(analysis)
+                .serve(std::io::stdin().lock(), std::io::stdout().lock())?;
+            Ok(())
+        }
         Some(Cmd::Tui {
             path,
             runtime,
@@ -156,6 +241,7 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
         path,
         change,
         explain: explain_args,
+        judge: judge_args,
         runtime,
         output:
             OutputArgs {
@@ -176,6 +262,19 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
         )?)
     } else {
         None
+    };
+    agent::refuse_dash("--judge-model", judge_args.judge_model.as_deref())?;
+    // Likewise a missing or signed-out agent.
+    let agent = match judge_args.judge.as_deref() {
+        Some(named) => {
+            let env_choice = std::env::var("VERNIER_AGENT").ok();
+            Some(agent::choose(
+                Some(named),
+                env_choice.as_deref(),
+                &agent::detect_for(Some(named), env_choice.as_deref()),
+            )?)
+        }
+        None => None,
     };
     let mut analysis = load(&path, runtime, include_tests)?;
     let depth = change.depth;
@@ -206,11 +305,30 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
             ),
         }
     }
+    // A failed judgment still leaves a report worth printing; the failure
+    // is reported, and sets the exit code, after it.
+    let judge_failed = agent
+        .and_then(|agent| run_judge(&mut analysis, agent, judge_args.judge_model.as_deref()).err());
     if let Some(out) = &html {
         std::fs::write(out, html::render(&analysis))
             .map_err(|e| anyhow::anyhow!("cannot write {}: {e}", out.display()))?;
         eprintln!("vernier: wrote {}", out.display());
     }
+    print(&analysis, json, full, no_color)?;
+    match judge_failed {
+        Some(err) => Err(anyhow::anyhow!("judge failed: {err}")),
+        None => Ok(()),
+    }
+}
+
+/// The report on stdout: JSON, or the text report with any explanation and
+/// judgment after it.
+fn print(
+    analysis: &vernier::Analysis,
+    json: bool,
+    full: bool,
+    no_color: bool,
+) -> anyhow::Result<()> {
     let mut out = std::io::stdout().lock();
     if json {
         writeln!(
@@ -223,14 +341,46 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
     let color =
         !no_color && std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
     let report = if analysis.blast.is_some() || full {
-        vernier::format_report(&analysis, color)
+        vernier::format_report(analysis, color)
     } else {
-        vernier::format_summary_report(&analysis, color, git::is_repository(&analysis.root))
+        vernier::format_summary_report(analysis, color, git::is_repository(&analysis.root))
     };
     writeln!(out, "{report}")?;
     if let Some(e) = &analysis.explanation {
         writeln!(out, "\n{}", vernier::format_explanation(e, color))?;
     }
+    if let Some(j) = &analysis.judgment {
+        writeln!(out, "\n{}", vernier::format_judgment(j, color))?;
+    }
+    Ok(())
+}
+
+/// Asks the agent about the inferred and uncertain links, if there are any.
+fn run_judge(
+    analysis: &mut vernier::Analysis,
+    agent: agent::Agent,
+    model: Option<&str>,
+) -> anyhow::Result<()> {
+    let Some(blast) = &analysis.blast else {
+        eprintln!(
+            "vernier: nothing to judge: no change to walk; name one with --pr, --diff or --files"
+        );
+        return Ok(());
+    };
+    let links = judge::links_to_judge(blast, &analysis.graph);
+    if links.is_empty() {
+        eprintln!(
+            "vernier: nothing uncertain to judge: every link in this blast radius is observed or static"
+        );
+        return Ok(());
+    }
+    eprintln!(
+        "vernier: asking {} (your subscription) to judge {} link{}; it reads this repository's code, read-only",
+        agent.label(),
+        links.len(),
+        if links.len() == 1 { "" } else { "s" }
+    );
+    analysis.judgment = Some(judge::judge(agent, model, analysis, &links)?);
     Ok(())
 }
 

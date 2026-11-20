@@ -244,8 +244,8 @@ the fixed wording for what is not reached.
 
 ## How `--explain` works
 
-`--explain` is the only part of Vernier that calls a model, and only when
-asked. After the walk, the blast radius (`blast` in the JSON: the change, the
+`--explain` calls a model only when asked (so does `--judge`, below). After
+the walk, the blast radius (`blast` in the JSON: the change, the
 changed services and their files, each reached service with its path of hops
 and confidence, the services not reached) goes to the provider the user
 picked, with a fixed system prompt: summarise it for a reviewer from those
@@ -259,6 +259,20 @@ OpenAI-compatible server through Chat Completions. The provider comes from
 the analysis runs; an HTTP error fails the command with the provider's own
 message. The reply is printed under EXPLANATION with the provider and model
 that wrote it, and is `explanation` in the JSON.
+
+## How `--judge` works
+
+`--judge` runs the user's own Claude Code (`claude -p`) or Codex
+(`codex exec`) in the repository, read-only, and asks it to check the
+inferred and uncertain links (at most 20) against the code. Vernier sends
+the agent the blast radius and the links to judge, each with its evidence
+file and line; the agent reads the code itself, and any verdict about a link
+Vernier didn't ask about is dropped. Claude Code loads only the user's own
+settings, with hooks off, so a repository's `.claude/settings.json` can't
+run anything during the judgment. The reply is validated against a schema
+and printed as JUDGMENT; it is `judgment` in the JSON. With no uncertain
+link no agent runs. `vernier agent` instead opens the agent interactively
+with Vernier's MCP server (`vernier mcp`) attached for that session only.
 
 ## Developing
 
