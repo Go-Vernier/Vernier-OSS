@@ -197,7 +197,7 @@ pub fn choose(
     if let Some(name) = wanted {
         let agent = Agent::parse(name).ok_or_else(|| {
             AgentError::NotReady(format!(
-                "vernier: unknown agent `{name}`; choose one of: claude, codex"
+                "unknown agent `{name}`; choose one of: claude, codex"
             ))
         })?;
         let ready = statuses
@@ -207,7 +207,7 @@ pub fn choose(
             Ok(agent)
         } else {
             Err(AgentError::NotReady(format!(
-                "vernier: {} is not ready: {}",
+                "{} is not ready: {}",
                 agent.label(),
                 agent.install_hint()
             )))
@@ -215,10 +215,14 @@ pub fn choose(
     }
     ALL.iter()
         .copied()
-        .find(|a| statuses.iter().any(|s| s.agent == *a && s.installed && s.signed_in))
+        .find(|a| {
+            statuses
+                .iter()
+                .any(|s| s.agent == *a && s.installed && s.signed_in)
+        })
         .ok_or_else(|| {
             AgentError::NotReady(format!(
-                "vernier: no coding agent is ready. {}: {}. {}: {}. Or use --explain with an API key.",
+                "no coding agent is ready. {}: {}. {}: {}. Or use --explain with an API key.",
                 Agent::ClaudeCode.label(),
                 Agent::ClaudeCode.install_hint(),
                 Agent::Codex.label(),
@@ -255,7 +259,7 @@ pub fn run_in(
 ) -> Result<RunOutput, AgentError> {
     let (program, rest) = argv
         .split_first()
-        .ok_or_else(|| AgentError::Failed("vernier: no command to run".into()))?;
+        .ok_or_else(|| AgentError::Failed("no command to run".into()))?;
     let mut command = Command::new(program);
     command
         .args(rest)
@@ -270,7 +274,7 @@ pub fn run_in(
     std::os::unix::process::CommandExt::process_group(&mut command, 0);
     let mut child = command
         .spawn()
-        .map_err(|e| AgentError::Failed(format!("vernier: could not start {program}: {e}")))?;
+        .map_err(|e| AgentError::Failed(format!("could not start {program}: {e}")))?;
 
     // Feed stdin from its own thread: a child that never reads it must not
     // block us. A closed pipe just means it did not want the input.
@@ -297,9 +301,7 @@ pub fn run_in(
             Err(e) => {
                 kill_tree(&mut child);
                 let _ = child.wait();
-                return Err(AgentError::Failed(format!(
-                    "vernier: waiting for {program}: {e}"
-                )));
+                return Err(AgentError::Failed(format!("waiting for {program}: {e}")));
             }
         }
     };
@@ -318,7 +320,7 @@ pub fn run_in(
 }
 
 fn timed_out(program: &str, timeout: Duration) -> String {
-    format!("vernier: {program} timed out after {}s", timeout.as_secs())
+    format!("{program} timed out after {}s", timeout.as_secs())
 }
 
 fn collect(rx: &mpsc::Receiver<String>, deadline: Instant) -> Option<String> {

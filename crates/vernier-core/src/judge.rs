@@ -400,7 +400,7 @@ pub fn judge(
 ) -> Result<Judgment, AgentError> {
     let Some(blast) = &analysis.blast else {
         return Err(AgentError::Failed(
-            "vernier: nothing to judge without a change".into(),
+            "nothing to judge without a change".into(),
         ));
     };
     let binary = agent::which(agent.binary())
@@ -416,7 +416,7 @@ pub fn judge(
         COUNTER.fetch_add(1, Ordering::Relaxed)
     ));
     std::fs::create_dir(&tmp)
-        .map_err(|e| AgentError::Failed(format!("vernier: can't create {}: {e}", tmp.display())))?;
+        .map_err(|e| AgentError::Failed(format!("can't create {}: {e}", tmp.display())))?;
     let result = run_judge(agent, model, analysis, blast, links, &binary, &tmp);
     let _ = std::fs::remove_dir_all(&tmp);
     result
@@ -431,9 +431,8 @@ fn run_judge(
     binary: &Path,
     tmp: &Path,
 ) -> Result<Judgment, AgentError> {
-    let write_err = |e: std::io::Error| {
-        AgentError::Failed(format!("vernier: can't write {}: {e}", tmp.display()))
-    };
+    let write_err =
+        |e: std::io::Error| AgentError::Failed(format!("can't write {}: {e}", tmp.display()));
     std::fs::write(tmp.join("schema.json"), schema().to_string()).map_err(write_err)?;
     let mut argv = judge_argv(agent, model, &analysis.root, tmp);
     argv[0] = binary.display().to_string();

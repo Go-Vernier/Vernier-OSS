@@ -3,7 +3,7 @@ use std::io::{IsTerminal, Write};
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
-use vernier::{Change, RuntimeInput, blast, explain, git, history, html};
+use vernier::{Change, RuntimeInput, agent, blast, explain, git, history, html, judge};
 
 const EXAMPLES: &str = "\
 Examples:
@@ -11,6 +11,7 @@ Examples:
   vernier --pr 481                 what pull request #481 can reach
   vernier --files cart/server.js   what a change to these files can reach
   vernier --explain                add a plain-English summary from your own LLM key
+  vernier --judge                  have your Claude Code or Codex check the links against the code
   vernier --full                   every service, edge and finding
   vernier tui                      explore it interactively";
 
@@ -63,6 +64,8 @@ struct AnalyzeArgs {
     #[command(flatten)]
     explain: ExplainArgs,
     #[command(flatten)]
+    judge: JudgeArgs,
+    #[command(flatten)]
     runtime: RuntimeArgs,
     #[command(flatten)]
     output: OutputArgs,
@@ -108,6 +111,27 @@ struct ExplainArgs {
     /// Model name, instead of the provider's default [env: `VERNIER_LLM_MODEL`]
     #[arg(long, value_name = "NAME", requires = "explain")]
     model: Option<String>,
+}
+
+/// `--judge` and the coding agent it asks. It is the user's own signed-in
+/// Claude Code or Codex, so no key is read.
+#[derive(Args)]
+#[command(next_help_heading = "Judge with Claude Code or Codex")]
+struct JudgeArgs {
+    /// Have your signed-in Claude Code or Codex read the code and judge the
+    /// uncertain links; `--judge=codex` picks one [env: `VERNIER_AGENT`]
+    #[arg(
+        long,
+        value_name = "AGENT",
+        num_args = 0..=1,
+        require_equals = true,
+        default_missing_value = "",
+        conflicts_with = "explain"
+    )]
+    judge: Option<String>,
+    /// Model name for the agent, instead of its default
+    #[arg(long = "judge-model", value_name = "NAME", requires = "judge")]
+    judge_model: Option<String>,
 }
 
 fn main() {
@@ -156,6 +180,7 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
         path,
         change,
         explain: explain_args,
+        judge: judge_args,
         runtime,
         output:
             OutputArgs {
@@ -176,6 +201,15 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
         )?)
     } else {
         None
+    };
+    // Likewise a missing or signed-out agent.
+    let agent = match &judge_args.judge {
+        Some(named) => Some(agent::choose(
+            Some(named.as_str()),
+            std::env::var("VERNIER_AGENT").ok().as_deref(),
+            &agent::detect(),
+        )?),
+        None => None,
     };
     let mut analysis = load(&path, runtime, include_tests)?;
     let depth = change.depth;
@@ -206,6 +240,9 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
             ),
         }
     }
+    if let Some(agent) = agent {
+        run_judge(&mut analysis, agent, judge_args.judge_model.as_deref())?;
+    }
     if let Some(out) = &html {
         std::fs::write(out, html::render(&analysis))
             .map_err(|e| anyhow::anyhow!("cannot write {}: {e}", out.display()))?;
@@ -231,6 +268,38 @@ fn analyze(args: AnalyzeArgs) -> anyhow::Result<()> {
     if let Some(e) = &analysis.explanation {
         writeln!(out, "\n{}", vernier::format_explanation(e, color))?;
     }
+    if let Some(j) = &analysis.judgment {
+        writeln!(out, "\n{}", vernier::format_judgment(j, color))?;
+    }
+    Ok(())
+}
+
+/// Asks the agent about the inferred and uncertain links, if there are any.
+fn run_judge(
+    analysis: &mut vernier::Analysis,
+    agent: agent::Agent,
+    model: Option<&str>,
+) -> anyhow::Result<()> {
+    let Some(blast) = &analysis.blast else {
+        eprintln!(
+            "vernier: nothing to judge: no change to walk; name one with --pr, --diff or --files"
+        );
+        return Ok(());
+    };
+    let links = judge::links_to_judge(blast, &analysis.graph);
+    if links.is_empty() {
+        eprintln!(
+            "vernier: nothing uncertain to judge: every link in this blast radius is observed or static"
+        );
+        return Ok(());
+    }
+    eprintln!(
+        "vernier: asking {} (your subscription) to judge {} link{}; it reads this repository's code, read-only",
+        agent.label(),
+        links.len(),
+        if links.len() == 1 { "" } else { "s" }
+    );
+    analysis.judgment = Some(judge::judge(agent, model, analysis, &links)?);
     Ok(())
 }
 
