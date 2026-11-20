@@ -317,3 +317,42 @@ fn explanations_wrap_with_a_hanging_indent_and_name_their_author() {
     assert!(r.lines().all(|l| l.chars().count() <= 80), "{r}");
     assert!(r.contains("  - payment is uncertain"), "{r}");
 }
+
+#[test]
+fn judgments_print_risk_summary_links_and_checks() {
+    use vernier::judge::{Judgment, LinkVerdict, Risk, Verdict};
+    let j = Judgment {
+        agent: "claude-code".into(),
+        model: None,
+        risk: Risk::Medium,
+        summary: "The cart API change can break the storefront.".into(),
+        links: vec![
+            LinkVerdict {
+                from: "web".into(),
+                to: "cart".into(),
+                verdict: Verdict::Confirmed,
+                why: "web/app.js fetches the cart endpoint on every page load".into(),
+                file: Some("web/app.js".into()),
+                line: Some(12),
+            },
+            LinkVerdict {
+                from: "dispatch".into(),
+                to: "payment".into(),
+                verdict: Verdict::Unclear,
+                why: "not judged".into(),
+                file: None,
+                line: None,
+            },
+        ],
+        check: vec!["Run the storefront tests against the new cart API".into()],
+    };
+    let r = format_judgment(&j, false);
+    assert!(
+        r.starts_with("JUDGMENT  risk medium \u{b7} by Claude Code\n"),
+        "{r}"
+    );
+    assert!(r.contains("confirmed  web -> cart  web/app.js:12"), "{r}");
+    assert!(r.contains("unclear    dispatch -> payment\n"), "{r}");
+    assert!(r.contains("\nCHECK\n  - Run the storefront tests"), "{r}");
+    assert!(r.lines().all(|l| l.chars().count() <= 100), "{r}");
+}

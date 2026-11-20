@@ -457,6 +457,7 @@ fn never_observed_leaves_out_shared_databases_and_imports_and_ignores_do_not_war
         blast: None,
         history: None,
         explanation: None,
+        judgment: None,
     };
     let r = format_repo_report(&analysis, false);
     assert!(

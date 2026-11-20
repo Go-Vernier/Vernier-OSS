@@ -13,6 +13,7 @@ use crate::explain::Explanation;
 use crate::fs::{FileIndex, is_dir};
 use crate::graph::BlastGraph;
 use crate::history::History;
+use crate::judge::Judgment;
 use crate::map::{self, MappingStats};
 use crate::model::{DiscoveryStrategy, Edge, RuntimeSource, Service};
 
@@ -90,6 +91,8 @@ pub struct Analysis {
     pub history: Option<History>,
     /// Filled in by `--explain`.
     pub explanation: Option<Explanation>,
+    /// Filled in by the agent judge.
+    pub judgment: Option<Judgment>,
 }
 
 /// The JSON contract. Field order is part of it.
@@ -109,6 +112,8 @@ pub struct AnalysisJson {
     pub history: Option<History>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub explanation: Option<Explanation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judgment: Option<Judgment>,
 }
 
 impl Analysis {
@@ -124,6 +129,7 @@ impl Analysis {
             blast: self.blast.clone(),
             history: self.history.clone(),
             explanation: self.explanation.clone(),
+            judgment: self.judgment.clone(),
         }
     }
 }
@@ -173,6 +179,7 @@ pub fn analyze_with(root: &Path, options: Options) -> Result<Analysis, AnalyzeEr
         blast: None,
         history: None,
         explanation: None,
+        judgment: None,
     })
 }
 

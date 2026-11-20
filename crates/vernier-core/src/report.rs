@@ -235,6 +235,82 @@ pub fn format_explanation(e: &crate::explain::Explanation, color: bool) -> Strin
     out.join("\n")
 }
 
+/// Wraps `text` to the report's width: `first` starts the first line,
+/// `rest` every continuation.
+fn wrap_into(out: &mut Vec<String>, text: &str, first: &str, rest: &str) {
+    let mut current = first.to_string();
+    let mut empty = true;
+    for word in text.split_whitespace() {
+        if !empty && current.len() + 1 + word.len() > 78 {
+            out.push(std::mem::replace(&mut current, rest.to_string()));
+            empty = true;
+        }
+        if !empty {
+            current.push(' ');
+        }
+        current.push_str(word);
+        empty = false;
+    }
+    out.push(current);
+}
+
+/// JUDGMENT: what the agent made of the links static analysis was least sure
+/// of, with the agent that judged them and the checks it asks for.
+pub fn format_judgment(j: &crate::judge::Judgment, color: bool) -> String {
+    let c = Paint { color };
+    let label = if j.agent == "codex" {
+        "Codex"
+    } else {
+        "Claude Code"
+    };
+    let by = match &j.model {
+        Some(model) => format!("{label} {model}"),
+        None => label.to_string(),
+    };
+    let mut out = vec![
+        format!(
+            "{}  {}",
+            c.bold("JUDGMENT"),
+            c.dim(&format!("risk {} \u{b7} by {by}", j.risk.as_str()))
+        ),
+        String::new(),
+    ];
+    wrap_into(&mut out, &j.summary, "  ", "  ");
+    if !j.links.is_empty() {
+        out.push(String::new());
+        for l in &j.links {
+            let place = match (&l.file, l.line) {
+                (Some(file), Some(line)) => format!("  {file}:{line}"),
+                (Some(file), None) => format!("  {file}"),
+                _ => String::new(),
+            };
+            let verdict = format!("{:<9}", l.verdict.as_str());
+            let verdict = match l.verdict {
+                crate::judge::Verdict::Confirmed => verdict,
+                crate::judge::Verdict::Doubtful => c.yellow(&verdict),
+                crate::judge::Verdict::Unclear => c.dim(&verdict),
+            };
+            out.push(format!("  {verdict}  {} -> {}{place}", l.from, l.to));
+            if !l.why.is_empty() {
+                wrap_into(&mut out, &l.why, "    ", "    ");
+            }
+        }
+    }
+    if !j.check.is_empty() {
+        out.push(String::new());
+        out.push(c.bold("CHECK"));
+        for item in &j.check {
+            wrap_into(&mut out, item, "  - ", "    ");
+        }
+    }
+    out.push(String::new());
+    out.push(format!(
+        "  {}",
+        c.dim("Judged by an agent that read the code; it can be wrong, so verify before relying on it.")
+    ));
+    out.join("\n")
+}
+
 /// The service with the most distinct callers, and how many. Ties go to
 /// the first name.
 fn most_connected(edges: &[Edge]) -> Option<(String, usize)> {
