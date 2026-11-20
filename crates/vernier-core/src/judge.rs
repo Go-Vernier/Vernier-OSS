@@ -346,6 +346,13 @@ pub fn judge_argv(agent: Agent, model: Option<&str>, root: &Path, tmp: &Path) ->
                 "--strict-mcp-config",
                 "--no-session-persistence",
                 "--disable-slash-commands",
+                // `-p` skips the workspace trust prompt, so without these the
+                // repository's own `.claude/settings.json` (hooks, env,
+                // apiKeyHelper) would run during a "read-only" judgment.
+                "--setting-sources",
+                "user",
+                "--settings",
+                r#"{"disableAllHooks":true}"#,
             ]);
             if let Some(m) = model {
                 add(&["--model", m]);
@@ -839,10 +846,39 @@ mod tests {
         let root = Path::new("/repo");
         let tmp = Path::new("/tmp/j");
         let claude = judge_argv(Agent::ClaudeCode, None, root, tmp);
-        assert_eq!(claude[0], "claude");
-        for want in ["--tools", "Read,Grep,Glob", "dontAsk", "--json-schema"] {
-            assert!(claude.iter().any(|a| a == want), "{claude:?}");
-        }
+        let schema = schema().to_string();
+        let expected: Vec<&str> = vec![
+            "claude",
+            "-p",
+            "--output-format",
+            "json",
+            "--tools",
+            "Read,Grep,Glob",
+            "--permission-mode",
+            "dontAsk",
+            "--strict-mcp-config",
+            "--no-session-persistence",
+            "--disable-slash-commands",
+            "--setting-sources",
+            "user",
+            "--settings",
+            r#"{"disableAllHooks":true}"#,
+            "--system-prompt",
+            SYSTEM,
+            "--json-schema",
+            &schema,
+        ];
+        assert_eq!(claude, expected);
+        // The repo's own .claude/settings.json (hooks, env, apiKeyHelper)
+        // must not load: `claude -p` skips the trust prompt.
+        let at = claude
+            .iter()
+            .position(|a| a == "--setting-sources")
+            .unwrap();
+        assert_eq!(claude[at + 1], "user");
+        let at = claude.iter().position(|a| a == "--settings").unwrap();
+        let settings: Value = serde_json::from_str(&claude[at + 1]).unwrap();
+        assert_eq!(settings, json!({"disableAllHooks": true}));
         assert!(!claude.iter().any(|a| a == "--bare"));
         assert!(!claude.iter().any(|a| a == "--model"));
         let with = judge_argv(Agent::ClaudeCode, Some("opus"), root, tmp);

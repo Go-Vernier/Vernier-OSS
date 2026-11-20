@@ -596,7 +596,14 @@ mod tests {
             .position(|a| a == "--append-system-prompt")
             .unwrap();
         assert_eq!(claude[j + 1], HANDOFF_INSTRUCTIONS);
-        for banned in ["mcp", "add", "--bare", "--strict-mcp-config"] {
+        for banned in [
+            "mcp",
+            "add",
+            "--bare",
+            "--strict-mcp-config",
+            "--setting-sources",
+            "--settings",
+        ] {
             assert!(!claude.iter().any(|a| a == banned), "{banned}");
         }
         assert!(!claude.iter().any(|a| a == "--model"));
