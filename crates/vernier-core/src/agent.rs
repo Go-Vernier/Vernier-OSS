@@ -429,13 +429,45 @@ mod tests {
     }
 
     #[cfg(unix)]
+    fn test_dir(name: &str) -> PathBuf {
+        let dir =
+            std::env::temp_dir().join(format!("vernier-agent-test-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[cfg(unix)]
+    fn process_alive(pid: &str) -> bool {
+        Command::new("kill")
+            .args(["-0", pid])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    #[cfg(unix)]
     #[test]
     fn run_kills_a_hung_child() {
-        let argv = ["sh", "-c", "sleep 30 & wait"].map(String::from);
+        let dir = test_dir("hung");
+        let script = format!("sleep 30 & echo $! > '{}'; wait", dir.join("pid").display());
+        let argv = ["sh", "-c", &script].map(String::from);
         let start = Instant::now();
         let result = run(&argv, "", Path::new("."), Duration::from_secs(1));
         assert!(matches!(result, Err(AgentError::Timeout(_))), "{result:?}");
         assert!(start.elapsed() < Duration::from_secs(5));
+        // The backgrounded grandchild must die with the group, not just the shell.
+        let pid = std::fs::read_to_string(dir.join("pid"))
+            .unwrap()
+            .trim()
+            .to_string();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while process_alive(&pid) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        let alive = process_alive(&pid);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!alive, "grandchild {pid} survived the timeout");
     }
 
     #[cfg(unix)]
@@ -443,11 +475,9 @@ mod tests {
     fn run_returns_when_a_grandchild_holds_the_pipe() {
         let argv = ["sh", "-c", "(sleep 30 &) ; echo done"].map(String::from);
         let start = Instant::now();
-        let out = run(&argv, "", Path::new("."), Duration::from_secs(1));
-        assert!(start.elapsed() < Duration::from_secs(6), "{out:?}");
-        if let Ok(out) = out {
-            assert_eq!(out.stdout, "done\n");
-        }
+        let out = run(&argv, "", Path::new("."), Duration::from_secs(10)).unwrap();
+        assert_eq!(out.stdout, "done\n");
+        assert!(start.elapsed() < Duration::from_secs(3));
     }
 
     #[cfg(unix)]
