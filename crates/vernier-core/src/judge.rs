@@ -4,8 +4,7 @@
 //! the rest were found in the code or seen in production.
 use std::collections::BTreeSet;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -22,7 +21,6 @@ pub const JUDGE_TIMEOUT_SECONDS: u64 = 600;
 /// unjudged.
 pub const MAX_LINKS: usize = 20;
 
-static COUNTER: AtomicU64 = AtomicU64::new(0);
 const MAX_CHECK: usize = 6;
 const MAX_EVIDENCE: usize = 3;
 const SNIPPET_CHARS: usize = 300;
@@ -406,18 +404,8 @@ pub fn judge(
     };
     let binary = agent::which(agent.binary())
         .ok_or_else(|| AgentError::NotReady(agent.install_hint().to_string()))?;
-    // Unique and freshly created: a path that already exists is an error, so
-    // another process (or a planted directory) is never reused.
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |d| d.as_nanos());
-    let tmp = std::env::temp_dir().join(format!(
-        "vernier-judge-{}-{nanos}-{}",
-        std::process::id(),
-        COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    std::fs::create_dir(&tmp)
-        .map_err(|e| AgentError::Failed(format!("can't create {}: {e}", tmp.display())))?;
+    let tmp = agent::fresh_temp_dir("vernier-judge")
+        .map_err(|e| AgentError::Failed(format!("can't create a temp directory: {e}")))?;
     let result = run_judge(agent, model, analysis, blast, links, &binary, &tmp);
     let _ = std::fs::remove_dir_all(&tmp);
     result

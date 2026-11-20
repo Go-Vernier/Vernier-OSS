@@ -8,14 +8,16 @@
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use serde_json::Value;
+use serde_json::{Value, json};
 use thiserror::Error;
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(20);
+static COUNTER: AtomicU64 = AtomicU64::new(0);
 const POLL: Duration = Duration::from_millis(50);
 /// Extra time for the readers to drain after the child is gone.
 const GRACE: Duration = Duration::from_secs(2);
@@ -359,6 +361,120 @@ fn kill_tree(child: &mut Child) {
     let _ = child.kill();
 }
 
+/// Told to the agent when vernier hands the terminal over. No double quotes
+/// or backslashes, so it survives being quoted as a TOML string for Codex.
+pub const HANDOFF_INSTRUCTIONS: &str = "Vernier's tools are attached to this session: blast_radius, with no arguments, gives the services your changes on this branch can reach, and it also takes files, pr or diff to name another change; services lists what Vernier found; edges lists how they connect. Use them to answer questions about what a change can affect. Read the code to verify any link marked uncertain or inferred, and cite file:line. Never call a service safe just because no path to it was found.";
+
+/// A new, empty directory under the system temp dir. Unique and freshly
+/// created: a path that already exists is an error, so another process (or a
+/// planted directory) is never reused.
+pub fn fresh_temp_dir(prefix: &str) -> std::io::Result<PathBuf> {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let dir = std::env::temp_dir().join(format!(
+        "{prefix}-{}-{nanos}-{}",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::Relaxed)
+    ));
+    std::fs::create_dir(&dir)?;
+    Ok(dir)
+}
+
+/// The MCP server entry that attaches `vernier mcp <root>` to one session.
+pub fn mcp_config_json(vernier: &Path, root: &Path) -> Value {
+    json!({"mcpServers": {"vernier": {
+        "command": vernier.to_string_lossy(),
+        "args": ["mcp", root.to_string_lossy()],
+    }}})
+}
+
+/// argv for an interactive session with vernier's tools attached for this
+/// session only (nothing is installed into the agent's own config). argv[0]
+/// is the bare binary name; the caller swaps in the resolved path.
+pub fn handoff_argv(
+    agent: Agent,
+    vernier: &Path,
+    root: &Path,
+    mcp_config: &Path,
+    model: Option<&str>,
+    prompt: Option<&str>,
+) -> Vec<String> {
+    let mut argv = vec![agent.binary().to_string()];
+    match agent {
+        Agent::ClaudeCode => {
+            argv.extend([
+                "--mcp-config".into(),
+                mcp_config.to_string_lossy().into_owned(),
+                "--append-system-prompt".into(),
+                HANDOFF_INSTRUCTIONS.into(),
+            ]);
+            if let Some(m) = model {
+                argv.extend(["--model".into(), m.into()]);
+            }
+        }
+        Agent::Codex => {
+            // JSON strings and arrays of strings are valid TOML values.
+            let quote = |v: &Value| v.to_string();
+            let server_args = json!(["mcp", root.to_string_lossy()]);
+            for setting in [
+                format!(
+                    "mcp_servers.vernier.command={}",
+                    quote(&json!(vernier.to_string_lossy()))
+                ),
+                format!("mcp_servers.vernier.args={}", quote(&server_args)),
+                "mcp_servers.vernier.tool_timeout_sec=600".to_string(),
+                format!(
+                    "developer_instructions={}",
+                    quote(&json!(HANDOFF_INSTRUCTIONS))
+                ),
+            ] {
+                argv.extend(["-c".into(), setting]);
+            }
+            if let Some(m) = model {
+                argv.extend(["-m".into(), m.into()]);
+            }
+        }
+    }
+    if let Some(p) = prompt {
+        argv.push(p.into());
+    }
+    argv
+}
+
+/// Run the agent interactively in `root` with vernier attached, and return
+/// its exit code (1 if a signal killed it). It shares our terminal and
+/// process group, so job control and Ctrl-C reach it directly.
+pub fn handoff(
+    agent: Agent,
+    root: &Path,
+    model: Option<&str>,
+    prompt: Option<&str>,
+) -> Result<i32, AgentError> {
+    let binary =
+        which(agent.binary()).ok_or_else(|| AgentError::NotReady(agent.install_hint().into()))?;
+    let vernier = std::env::current_exe()
+        .map_err(|e| AgentError::Failed(format!("can't locate this executable: {e}")))?;
+    let tmp = fresh_temp_dir("vernier-agent")
+        .map_err(|e| AgentError::Failed(format!("can't create a temp directory: {e}")))?;
+    let result = (|| {
+        let config = tmp.join("mcp.json");
+        std::fs::write(&config, mcp_config_json(&vernier, root).to_string())
+            .map_err(|e| AgentError::Failed(format!("can't write {}: {e}", config.display())))?;
+        let argv = handoff_argv(agent, &vernier, root, &config, model, prompt);
+        let status = Command::new(&binary)
+            .args(&argv[1..])
+            .env_clear()
+            .envs(scrub(std::env::vars()))
+            .current_dir(root)
+            .status()
+            .map_err(|e| AgentError::Failed(format!("can't start {}: {e}", agent.label())))?;
+        Ok(status.code().unwrap_or(1))
+    })();
+    let _ = std::fs::remove_dir_all(&tmp);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -436,6 +552,107 @@ mod tests {
             panic!("unknown agent");
         };
         assert!(message.contains("claude, codex"), "{message}");
+    }
+
+    #[test]
+    fn handoff_argv_attaches_vernier_for_this_session_only() {
+        let vernier = Path::new("/opt/my tools/vernier");
+        let root = Path::new("/Users/a b/Dream YC/repo");
+        let cfg = Path::new("/tmp/x y/mcp.json");
+
+        let claude = handoff_argv(Agent::ClaudeCode, vernier, root, cfg, None, None);
+        assert_eq!(claude[0], "claude");
+        let i = claude.iter().position(|a| a == "--mcp-config").unwrap();
+        assert_eq!(claude[i + 1], cfg.to_str().unwrap());
+        let j = claude
+            .iter()
+            .position(|a| a == "--append-system-prompt")
+            .unwrap();
+        assert_eq!(claude[j + 1], HANDOFF_INSTRUCTIONS);
+        for banned in ["mcp", "add", "--bare", "--strict-mcp-config"] {
+            assert!(!claude.iter().any(|a| a == banned), "{banned}");
+        }
+        assert!(!claude.iter().any(|a| a == "--model"));
+        let with = handoff_argv(
+            Agent::ClaudeCode,
+            vernier,
+            root,
+            cfg,
+            Some("opus"),
+            Some("what breaks?"),
+        );
+        let m = with.iter().position(|a| a == "--model").unwrap();
+        assert_eq!(with[m + 1], "opus");
+        assert_eq!(with.last().unwrap(), "what breaks?");
+
+        let codex = handoff_argv(
+            Agent::Codex,
+            vernier,
+            root,
+            cfg,
+            Some("gpt-x"),
+            Some("hello"),
+        );
+        assert_eq!(codex[0], "codex");
+        let mut values = std::collections::HashMap::new();
+        for (k, a) in codex.iter().enumerate() {
+            if a == "-c" {
+                let (key, value) = codex[k + 1].split_once('=').unwrap();
+                let parsed: toml::Value = toml::from_str(&format!("x = {value}")).unwrap();
+                values.insert(key.to_string(), parsed["x"].clone());
+            }
+        }
+        assert_eq!(
+            values["mcp_servers.vernier.command"].as_str().unwrap(),
+            vernier.to_str().unwrap()
+        );
+        let args: Vec<&str> = values["mcp_servers.vernier.args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap())
+            .collect();
+        assert_eq!(args, ["mcp", root.to_str().unwrap()]);
+        assert_eq!(
+            values["mcp_servers.vernier.tool_timeout_sec"].as_integer(),
+            Some(600)
+        );
+        assert_eq!(
+            values["developer_instructions"].as_str().unwrap(),
+            HANDOFF_INSTRUCTIONS
+        );
+        let m = codex.iter().position(|a| a == "-m").unwrap();
+        assert_eq!(codex[m + 1], "gpt-x");
+        assert_eq!(codex.last().unwrap(), "hello");
+    }
+
+    #[test]
+    fn handoff_instructions_survive_toml_quoting() {
+        assert!(!HANDOFF_INSTRUCTIONS.contains('"'));
+        assert!(!HANDOFF_INSTRUCTIONS.contains('\\'));
+        for tool in ["blast_radius", "services", "edges"] {
+            assert!(HANDOFF_INSTRUCTIONS.contains(tool));
+        }
+    }
+
+    #[test]
+    fn mcp_config_points_at_this_binary() {
+        let json = mcp_config_json(Path::new("/abs/vernier"), Path::new("/abs/root"));
+        assert_eq!(
+            json,
+            serde_json::json!({"mcpServers":{"vernier":{
+                "command":"/abs/vernier","args":["mcp","/abs/root"]}}})
+        );
+    }
+
+    #[test]
+    fn fresh_temp_dir_is_unique_and_created() {
+        let a = fresh_temp_dir("vernier-agent-test").unwrap();
+        let b = fresh_temp_dir("vernier-agent-test").unwrap();
+        assert_ne!(a, b);
+        assert!(a.is_dir() && b.is_dir());
+        let _ = std::fs::remove_dir_all(&a);
+        let _ = std::fs::remove_dir_all(&b);
     }
 
     #[cfg(unix)]

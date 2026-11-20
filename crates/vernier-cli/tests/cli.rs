@@ -926,3 +926,18 @@ fn mcp_fails_with_the_usual_error_on_a_missing_path() {
     assert!(String::from_utf8_lossy(&out.stderr).starts_with("vernier:"));
     assert!(out.stdout.is_empty());
 }
+
+#[test]
+fn agent_needs_a_terminal() {
+    let out = bin()
+        .arg("agent")
+        .stdin(std::process::Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("agent needs a terminal"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+}

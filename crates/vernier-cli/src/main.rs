@@ -13,6 +13,7 @@ Examples:
   vernier --explain                add a plain-English summary from your own LLM key
   vernier --judge                  have your Claude Code or Codex check the links against the code
   vernier --full                   every service, edge and finding
+  vernier agent                    ask your Claude Code or Codex follow-ups, with Vernier's tools
   vernier tui                      explore it interactively";
 
 #[derive(Parser)]
@@ -51,6 +52,21 @@ enum Cmd {
         /// Also read test, fixture and example directories
         #[arg(long = "include-tests")]
         include_tests: bool,
+    },
+    /// Open Claude Code or Codex here with Vernier's tools attached
+    Agent {
+        /// Repository root
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Which agent: claude or codex [env: `VERNIER_AGENT`]
+        #[arg(long, value_name = "AGENT")]
+        with: Option<String>,
+        /// Model to ask the agent to use
+        #[arg(long, value_name = "NAME")]
+        model: Option<String>,
+        /// First message to send
+        #[arg(long, value_name = "TEXT")]
+        prompt: Option<String>,
     },
     /// Serve the blast radius to a coding agent over MCP on stdio
     #[command(hide = true)]
@@ -156,6 +172,27 @@ fn run() -> anyhow::Result<()> {
     match cli.command {
         None => analyze(cli.analyze),
         Some(Cmd::Analyze(args)) => analyze(args),
+        Some(Cmd::Agent {
+            path,
+            with,
+            model,
+            prompt,
+        }) => {
+            if !std::io::stdout().is_terminal() || !std::io::stdin().is_terminal() {
+                anyhow::bail!("agent needs a terminal; for a one-shot verdict use vernier --judge");
+            }
+            let agent = agent::choose(
+                with.as_deref(),
+                std::env::var("VERNIER_AGENT").ok().as_deref(),
+                &agent::detect(),
+            )?;
+            let root = path
+                .canonicalize()
+                .map_err(|e| anyhow::anyhow!("can't read {}: {e}", path.display()))?;
+            anyhow::ensure!(root.is_dir(), "{} is not a directory", root.display());
+            let code = agent::handoff(agent, &root, model.as_deref(), prompt.as_deref())?;
+            std::process::exit(code);
+        }
         Some(Cmd::Mcp {
             path,
             include_tests,
